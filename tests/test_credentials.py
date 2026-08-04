@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from src.options_bot.credentials import CredentialFileError, load_credentials
+from options_bot.credentials import CredentialFileError, load_credentials
 
 
 def test_loads_expected_names(tmp_path: Path) -> None:

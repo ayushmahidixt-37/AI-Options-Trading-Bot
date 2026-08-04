@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install package and development tools
+        run: python -m pip install -e '.[dev]'
+      - name: Lint
+        run: ruff check src tests
+      - name: Compile
+        run: python -m compileall -q src tests
+      - name: Test
+        run: pytest -q
+
+  deployment-files:
+    name: Deployment files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate shell script
+        run: bash -n deploy/install.sh
+      - name: Reject unresolved merge markers
+        run: |
+          if git grep -nE '^(<<<<<<<|=======|>>>>>>>)'; then
+            echo 'Unresolved merge conflict marker found.' >&2
+            exit 1
+          fi
