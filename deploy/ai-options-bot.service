@@ -1,0 +1,24 @@
+[Unit]
+Description=AI Options Bot (paper trading only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ai-options-bot
+Group=ai-options-bot
+WorkingDirectory=/opt/ai-options-bot
+EnvironmentFile=/etc/ai-options-bot/bot.env
+EnvironmentFile=/etc/ai-options-bot/credentials.env
+ExecStart=/opt/ai-options-bot/.venv/bin/options-bot --config /etc/ai-options-bot/bot.env serve
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ai-options-bot
+
+[Install]
+WantedBy=multi-user.target

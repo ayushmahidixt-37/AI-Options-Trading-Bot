@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-DEFAULT_CREDENTIALS_PATH = Path("/gdrive/MyDrive/trading/credentials.env")
+DEFAULT_CREDENTIALS_PATH = Path("/etc/ai-options-bot/credentials.env")
 EXPECTED_CREDENTIAL_NAMES = frozenset(
     {
         "ANGEL_API_KEY",
