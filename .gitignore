@@ -1,0 +1,16 @@
+# Credentials must stay outside the repository.
+credentials.env
+*.env
+!.env.example
+
+# Trading databases and generated market data.
+*.sqlite
+*.sqlite3
+*.db
+data/
+
+# Python-generated files.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
