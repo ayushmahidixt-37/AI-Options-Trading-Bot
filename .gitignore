@@ -1,0 +1,20 @@
+# Credentials and environment files
+credentials.env
+*.env
+
+# Databases and generated trading data
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+data/
+trading_data/
+trades/
+trade_logs/
+*.parquet
+*.feather
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
