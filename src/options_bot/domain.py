@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from datetime import date
 
 
 @dataclass(frozen=True)
@@ -14,12 +15,16 @@ class Instrument:
     underlying: str
     option_type: str
     lot_size: int
+    expiry: date | None = None
+    strike: float | None = None
 
     def __post_init__(self) -> None:
         if self.option_type not in {"CE", "PE"}:
             raise ValueError("Only CE and PE instruments are supported")
         if self.lot_size <= 0:
             raise ValueError("lot_size must be positive")
+        if self.strike is not None and self.strike <= 0:
+            raise ValueError("strike must be positive")
 
 
 @dataclass(frozen=True)

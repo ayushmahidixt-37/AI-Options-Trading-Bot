@@ -16,9 +16,10 @@ release contains no reachable broker order-submission implementation.
 - Risk checks reject stale quotes, excessive lots/risk, duplicate positions,
   insufficient capital, entries outside the configured window, and breached
   daily limits.
-- The original live prototype remains in `bot30.ipynb.txt` for reference, but
-  the server package does not import it. `execution/live_angel.py` always fails
-  closed so the preserved code cannot place an order.
+- The monolithic `bot30.ipynb.txt` prototype has been removed. Its maintained
+  responsibilities now live in focused package modules.
+- The preserved live adapter is isolated in `execution/live_angel.py`; the
+  application configuration rejects live mode before it can be constructed.
 
 ## Server layout
 
@@ -92,6 +93,26 @@ options-bot status           show paper account and open positions
 options-bot serve            run the signal-aware service skeleton
 ```
 
+## Functional modules
+
+```text
+config.py                  validated server and risk settings
+credentials.py             strict external secret-file parsing
+instruments.py             Angel instrument-master normalization and ATM universe
+market_data.py             Angel One quote/candle data only
+candles.py                 thread-safe closed-candle aggregation
+indicators.py              SMA, EMA, RSI, ATR
+strategy.py                deterministic underlying direction and CE/PE selection
+risk.py                    centralized paper pre-trade checks
+paper_broker.py            conservative simulated fills
+ledger.py                  transactional SQLite state
+backtest.py                chronological, no-same-bar-look-ahead replay
+reporting.py               paper-account reports
+notifications.py           alert-only Telegram sender
+service.py                 process lifecycle and single-instance lock
+execution/live_angel.py    preserved, independently gated future live adapter
+```
+
 ## Tests
 
 ```bash
@@ -99,10 +120,16 @@ python -m pytest -q
 python -m compileall -q src tests
 ```
 
+Pull requests run the same checks on Python 3.11 and 3.12 through GitHub
+Actions. Repository owners can enable native auto-merge by following
+[`docs/GITHUB_AUTOMATION.md`](docs/GITHUB_AUTOMATION.md). The recommended solo
+setup requires CI but no artificial bot approval; team repositories should keep
+an independent human approval requirement.
+
 ## Next milestones
 
-1. Add an Angel One **market-data-only** adapter with token, exchange, timestamp,
-   WebSocket, candle, and freshness validation.
-2. Add the first deterministic NIFTY strategy using closed underlying candles.
-3. Add end-of-day paper exits, daily reports, and SQLite backup/restore commands.
-4. Add chronological backtesting that reuses the paper strategy and risk code.
+1. Connect the Angel One market-data adapter to authenticated sessions and add
+   WebSocket reconnection/health handling.
+2. Connect the deterministic strategy to live market data and the paper broker.
+3. Add end-of-day paper exits and SQLite backup/restore commands.
+4. Extend chronological replay to option-contract fills through `PaperBroker`.
