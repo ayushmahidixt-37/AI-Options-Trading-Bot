@@ -33,7 +33,11 @@ cd "${APP_DIR}"
 git pull --ff-only || true
 
 python -m pip install --upgrade pip setuptools wheel
-python -m pip install --no-build-isolation -e '.[dev]'
+if ! python -m pip install -e '.[dev]'; then
+  echo "Standard install failed; installing Rust/Python build backend helpers and retrying." >&2
+  python -m pip install --upgrade maturin
+  python -m pip install --no-build-isolation -e '.[dev]'
+fi
 
 mkdir -p "${DATA_DIR}"
 if [[ ! -f ${CONFIG_FILE} ]]; then
