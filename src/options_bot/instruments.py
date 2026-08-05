@@ -20,11 +20,11 @@ def normalize_instruments(rows: Iterable[Mapping[str, object]]) -> list[Instrume
         option_type = str(row.get("optiontype") or symbol[-2:]).upper()
         if option_type not in {"CE", "PE"}:
             continue
-        strike = float(row.get("strike") or 0)
-        if strike > 100_000:
-            strike /= 100
-        expiry = _parse_expiry(row.get("expiry"))
         try:
+            strike = float(row.get("strike") or 0)
+            if strike > 1_000:
+                strike /= 100
+            expiry = _parse_expiry(row.get("expiry"))
             instruments.append(
                 Instrument(
                     symbol=symbol,
@@ -43,6 +43,8 @@ def normalize_instruments(rows: Iterable[Mapping[str, object]]) -> list[Instrume
 
 
 def _parse_expiry(value: object) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
     if isinstance(value, date):
         return value
     text = str(value or "").strip()
@@ -67,6 +69,8 @@ def select_near_atm(
         raise ValueError("spot must be positive and strike_band non-negative")
     candidates = [item for item in instruments if item.underlying == underlying.upper()]
     expiry = nearest_expiry(candidates, today)
+    if expiry is None:
+        return []
     chain = [item for item in candidates if item.expiry == expiry and item.strike is not None]
     strikes = sorted({float(item.strike) for item in chain})
     if not strikes:

@@ -25,3 +25,11 @@ def test_out_of_order_and_naive_ticks_are_rejected() -> None:
         store.update("NIFTY", 100, aware - timedelta(minutes=1))
     with pytest.raises(ValueError, match="timezone-aware"):
         store.update("NIFTY", 100, datetime(2026, 8, 3, 10, 2))
+
+
+def test_same_minute_out_of_order_tick_is_rejected() -> None:
+    store = CandleStore()
+    start = datetime(2026, 8, 3, 10, 0, 30, tzinfo=ZoneInfo("Asia/Kolkata"))
+    store.update("NIFTY", 100, start)
+    with pytest.raises(ValueError, match="out-of-order"):
+        store.update("NIFTY", 101, start - timedelta(seconds=10))

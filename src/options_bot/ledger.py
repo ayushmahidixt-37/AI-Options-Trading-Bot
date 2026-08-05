@@ -111,6 +111,14 @@ class PaperLedger:
             ).fetchone()
         return int(row[0])
 
+    def realized_pnl_on(self, trading_date: str) -> float:
+        with self.connect() as con:
+            row = con.execute(
+                "SELECT COALESCE(SUM(realized_pnl), 0) FROM paper_orders WHERE trading_date=? AND status='CLOSED'",
+                (trading_date,),
+            ).fetchone()
+        return float(row[0])
+
     def insert_open(self, values: dict[str, object]) -> int:
         columns = ",".join(values)
         placeholders = ",".join("?" for _ in values)
@@ -119,6 +127,17 @@ class PaperLedger:
                 f"INSERT INTO paper_orders({columns}) VALUES ({placeholders})",
                 tuple(values.values()),
             )
+            return int(cursor.lastrowid)
+
+    def insert_open_with_fee(self, values: dict[str, object], fee: float) -> int:
+        columns = ",".join(values)
+        placeholders = ",".join("?" for _ in values)
+        with self.connect() as con:
+            cursor = con.execute(
+                f"INSERT INTO paper_orders({columns}) VALUES ({placeholders})",
+                tuple(values.values()),
+            )
+            con.execute("UPDATE paper_account SET fees_paid=fees_paid+? WHERE id=1", (fee,))
             return int(cursor.lastrowid)
 
     def close(self, order_id: int, *, at: str, price: float, fee: float, pnl: float, reason: str) -> None:
