@@ -110,6 +110,21 @@ options-bot --config /tmp/options-bot.env web --host 127.0.0.1 --port 8000
 Open `http://127.0.0.1:8000` and sign in as `admin`. Keep the UI bound to
 `127.0.0.1` unless you add a trusted reverse proxy with HTTPS.
 
+
+## Android tablet / Termux quick start
+
+If you only have an Android tablet, install Termux from F-Droid or GitHub, then run this in Termux:
+
+```bash
+pkg update -y
+pkg install -y git
+git clone https://github.com/ayushmahidixt-37/AI-Options-Trading-Bot.git
+cd AI-Options-Trading-Bot
+scripts/termux_web.sh
+```
+
+The script installs Python build tools, installs the project, creates a tablet-local config under `.termux-data`, runs tests, and starts the password-protected UI on `http://127.0.0.1:8000`. Open that URL in Chrome on the same tablet and sign in as `admin`.
+
 ## Functional modules
 
 ```text
