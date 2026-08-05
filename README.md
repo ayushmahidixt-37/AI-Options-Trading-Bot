@@ -91,7 +91,24 @@ options-bot init-db          initialize/migrate the paper ledger
 options-bot healthcheck      check mode, SQLite, and free disk
 options-bot status           show paper account and open positions
 options-bot serve            run the signal-aware service skeleton
+options-bot web              run the local password-protected paper UI
 ```
+
+## Local web UI
+
+The web UI is designed for local laptop/server control in paper mode. It uses
+HTTP Basic auth with username `admin` and a password from
+`OPTIONS_BOT_WEB_PASSWORD`. It shows safety status, health, paper account state,
+open paper positions, and paper-safe action buttons. Telegram remains alert-only
+and does not receive commands.
+
+```bash
+export OPTIONS_BOT_WEB_PASSWORD='change-this-local-password'
+options-bot --config /tmp/options-bot.env web --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000` and sign in as `admin`. Keep the UI bound to
+`127.0.0.1` unless you add a trusted reverse proxy with HTTPS.
 
 ## Functional modules
 
@@ -109,6 +126,8 @@ ledger.py                  transactional SQLite state
 backtest.py                chronological, no-same-bar-look-ahead replay
 reporting.py               paper-account reports
 notifications.py           alert-only Telegram sender
+actions.py                 UI-safe paper action helpers
+web.py                     local password-protected paper dashboard
 service.py                 process lifecycle and single-instance lock
 execution/live_angel.py    preserved, independently gated future live adapter
 ```

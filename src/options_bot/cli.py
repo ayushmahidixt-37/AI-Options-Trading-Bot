@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import uvicorn
 from pathlib import Path
 
 from .config import ConfigurationError, Settings, load_env_file
@@ -29,6 +30,9 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser("status")
     serve = commands.add_parser("serve")
     serve.add_argument("--heartbeat-seconds", type=float, default=30)
+    web = commands.add_parser("web")
+    web.add_argument("--host", default="127.0.0.1")
+    web.add_argument("--port", type=int, default=8000)
     return root
 
 
@@ -49,6 +53,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if report.ok else 1
         if args.command == "serve":
             return PaperService(app, interval_seconds=args.heartbeat_seconds).run()
+        if args.command == "web":
+            from .web import create_web_app
+
+            password = os.environ.get("OPTIONS_BOT_WEB_PASSWORD", "")
+            if not password:
+                raise ConfigurationError("OPTIONS_BOT_WEB_PASSWORD is required for the web UI")
+            uvicorn.run(create_web_app(settings, password), host=args.host, port=args.port)
+            return 0
         account = dict(app.ledger.account())
         positions = [dict(row) for row in app.ledger.open_positions()]
         print(json.dumps({"mode": "paper", "account": account, "positions": positions}, default=str))

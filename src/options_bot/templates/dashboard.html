@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Options Trading Bot</title>
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fb; color: #162033; }
+    header { background: #0f172a; color: white; padding: 1.2rem 2rem; }
+    main { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+    .card { background: white; border: 1px solid #d8deea; border-radius: 14px; box-shadow: 0 8px 20px rgba(15, 23, 42, .06); padding: 1rem; margin-bottom: 1rem; }
+    .safe { color: #047857; font-weight: 700; }
+    .blocked { color: #b91c1c; font-weight: 700; }
+    .message { padding: .8rem 1rem; border-radius: 10px; margin-bottom: 1rem; border: 1px solid; }
+    .message.ok { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+    .message.bad { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
+    button { border: 0; background: #2563eb; color: white; border-radius: 10px; padding: .7rem 1rem; cursor: pointer; font-weight: 650; }
+    button.secondary { background: #334155; }
+    button.danger { background: #dc2626; }
+    input { padding: .6rem; border: 1px solid #cbd5e1; border-radius: 8px; max-width: 9rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .75rem; border-bottom: 1px solid #e2e8f0; text-align: left; }
+    th { background: #f8fafc; }
+    .actions { display: flex; gap: .7rem; flex-wrap: wrap; }
+    code { background: #e2e8f0; padding: .15rem .35rem; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AI Options Trading Bot</h1>
+    <p>Local UI · Paper mode · Telegram alerts only</p>
+  </header>
+  <main>
+    {% if message %}
+      <div class="message {{ 'ok' if ok else 'bad' }}">{{ message }}</div>
+    {% endif %}
+
+    <section class="grid">
+      <div class="card">
+        <h2>Safety</h2>
+        <p>Mode: <span class="safe">{{ settings.trading_mode }}</span></p>
+        <p>Live trading: <span class="{{ 'blocked' if settings.live_trading_enabled else 'safe' }}">{{ settings.live_trading_enabled }}</span></p>
+        <p>Auto start: <span class="{{ 'blocked' if settings.auto_start else 'safe' }}">{{ settings.auto_start }}</span></p>
+      </div>
+      <div class="card">
+        <h2>Health</h2>
+        <p>Status: <span class="{{ 'safe' if health.ok else 'blocked' }}">{{ 'OK' if health.ok else 'FAILED' }}</span></p>
+        {% for name, value in health.checks.items() %}
+          <p><code>{{ name }}</code>: {{ value }}</p>
+        {% endfor %}
+      </div>
+      <div class="card">
+        <h2>Paper Account</h2>
+        <p>Starting capital: {{ '%.2f'|format(account.starting_capital) }}</p>
+        <p>Realized PnL: {{ '%.2f'|format(account.realized_pnl) }}</p>
+        <p>Fees paid: {{ '%.2f'|format(account.fees_paid) }}</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>UI-driven actions</h2>
+      <p>These buttons are paper-safe. The scan button does not place orders until market-data and confirmation flows are wired.</p>
+      <div class="actions">
+        <form method="post" action="/actions/healthcheck"><button type="submit">Run healthcheck</button></form>
+        <form method="post" action="/actions/paper-scan"><button class="secondary" type="submit">Run paper scan</button></form>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Open paper positions</h2>
+      {% if positions %}
+        <table>
+          <thead><tr><th>ID</th><th>Symbol</th><th>Units</th><th>Entry</th><th>Stop</th><th>Close manually</th></tr></thead>
+          <tbody>
+          {% for position in positions %}
+            <tr>
+              <td>{{ position.id }}</td>
+              <td>{{ position.symbol }}</td>
+              <td>{{ position.units }}</td>
+              <td>{{ position.entry_fill_price }}</td>
+              <td>{{ position.stop_price }}</td>
+              <td>
+                <form method="post" action="/positions/{{ position.id }}/close">
+                  <input required name="exit_price" type="number" min="0.01" step="0.01" placeholder="Exit price">
+                  <input name="reason" type="text" value="ui-close">
+                  <button class="danger" type="submit">Close paper</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No open paper positions.</p>
+      {% endif %}
+    </section>
+  </main>
+</body>
+</html>
