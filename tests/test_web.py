@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from fastapi.testclient import TestClient
 
 from options_bot.config import Settings
+from options_bot.connections import ConnectionManager
 from options_bot.domain import Instrument, PaperOrderRequest, Quote
 from options_bot.runner import build_application
 from options_bot.web import create_web_app
@@ -54,6 +55,54 @@ def test_web_health_and_scan_actions_are_safe(tmp_path: Path) -> None:
     assert "Healthcheck passed" in health.text
     assert scan.status_code == 200
     assert "no order was placed" in scan.text
+
+
+def test_web_connection_actions_show_nifty_and_telegram_status(tmp_path: Path) -> None:
+    credentials = tmp_path / "credentials.env"
+    credentials.write_text(
+        "ANGEL_API_KEY=api\n"
+        "ANGEL_CLIENT_CODE=CLIENT1234\n"
+        "ANGEL_PASSWORD=pin\n"
+        "ANGEL_TOTP_SECRET=secret\n"
+        "TELEGRAM_BOT_TOKEN=token\n"
+        "TELEGRAM_CHAT_ID=chat\n",
+        encoding="utf-8",
+    )
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "CREDENTIALS_PATH": str(credentials),
+        }
+    )
+
+    class FakeApi:
+        def generateSession(self, *_args):
+            return {"status": True, "data": {"jwtToken": "secret"}}
+
+        def ltpData(self, *_args):
+            return {"status": True, "data": {"ltp": 24600}}
+
+    class FakeNotifier:
+        def send(self, _text: str) -> None:
+            return None
+
+    connections = ConnectionManager(
+        cfg,
+        smart_api_factory=lambda _key: FakeApi(),
+        totp_factory=lambda _secret: "123456",
+        notifier_factory=lambda _token, _chat: FakeNotifier(),
+    )
+    client = TestClient(create_web_app(cfg, "secret", connections))
+
+    assert client.post("/actions/angel-connect", auth=auth()).status_code == 200
+    quote = client.post("/actions/nifty-refresh", auth=auth())
+    telegram = client.post("/actions/telegram-test", auth=auth())
+
+    assert "24600.00" in quote.text
+    assert "NIFTY quote refreshed" in quote.text
+    assert "15000" in quote.text
+    assert "Telegram test alert sent" in telegram.text
 
 
 def test_web_can_close_existing_paper_position(tmp_path: Path) -> None:

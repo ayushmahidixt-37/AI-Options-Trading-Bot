@@ -37,7 +37,7 @@ python -m pip install --upgrade pip setuptools wheel
 
 # Install only what is needed to run the dashboard. The dev extra includes Ruff,
 # whose Rust release build can exceed the memory available on Android tablets.
-python -m pip install fastapi jinja2 python-multipart tzdata uvicorn
+python -m pip install fastapi jinja2 pyotp python-multipart smartapi-python tzdata uvicorn
 python -m pip install --no-deps -e .
 
 mkdir -p "${DATA_DIR}"

@@ -11,6 +11,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 from .actions import close_paper_position_action, run_health_action, run_paper_scan_action, status_snapshot
+from .connections import ConnectionActionError, ConnectionManager
 from .runner import build_application
 from .config import Settings
 from .health import healthcheck
@@ -19,10 +20,15 @@ security = HTTPBasic()
 TEMPLATE_DIR = Path(__file__).with_name("templates")
 
 
-def create_web_app(settings: Settings, password: str) -> FastAPI:
+def create_web_app(
+    settings: Settings,
+    password: str,
+    connection_manager: ConnectionManager | None = None,
+) -> FastAPI:
     if not password:
         raise ValueError("A web UI password is required")
     application = build_application(settings)
+    connections = connection_manager or ConnectionManager(settings)
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     app = FastAPI(title="AI Options Trading Bot", docs_url=None, redoc_url=None)
 
@@ -46,6 +52,7 @@ def create_web_app(settings: Settings, password: str) -> FastAPI:
             "account": snapshot["account"],
             "positions": snapshot["positions"],
             "health": report,
+            "connections": connections.snapshot(),
             "message": message,
             "ok": ok,
         }
@@ -63,6 +70,54 @@ def create_web_app(settings: Settings, password: str) -> FastAPI:
     def run_paper_scan(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
         result = run_paper_scan_action(application)
         return templates.TemplateResponse(request=request, name="dashboard.html", context=dashboard_context(request, result.message, result.ok))
+
+    @app.post("/actions/angel-connect", response_class=HTMLResponse)
+    def connect_angel(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
+        try:
+            result = connections.connect_angel()
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, result.last_message, True),
+            )
+        except (ConnectionActionError, FileNotFoundError, ValueError) as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, str(exc), False),
+            )
+
+    @app.post("/actions/nifty-refresh", response_class=HTMLResponse)
+    def refresh_nifty(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
+        try:
+            result = connections.refresh_nifty()
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, result.last_message, True),
+            )
+        except ConnectionActionError as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, str(exc), False),
+            )
+
+    @app.post("/actions/telegram-test", response_class=HTMLResponse)
+    def test_telegram(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
+        try:
+            result = connections.test_telegram()
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, result.last_message, True),
+            )
+        except (ConnectionActionError, FileNotFoundError, ValueError) as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, str(exc), False),
+            )
 
     @app.post("/positions/{order_id}/close")
     def close_position(

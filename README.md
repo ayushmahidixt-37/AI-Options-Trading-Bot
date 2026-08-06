@@ -136,6 +136,8 @@ nano credentials.env
 
 Fill `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PASSWORD`, `ANGEL_TOTP_SECRET`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`. Do not paste credentials into GitHub, Colab, or chat. In Nano, save with **Ctrl+O**, press **Enter**, and exit with **Ctrl+X**. The Termux script creates this ignored file when needed, restricts it to the current user, and stops with editing instructions if a required value is empty.
 
+In the dashboard, use **Test Angel connection** before **Refresh NIFTY**. A connected dashboard refreshes the market-data-only NIFTY quote every 15 seconds. Use **Send test alert** to verify one-way Telegram notifications; Telegram commands and live order execution remain disabled.
+
 ## Functional modules
 
 ```text

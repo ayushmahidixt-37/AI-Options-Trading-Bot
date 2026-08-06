@@ -59,6 +59,31 @@
     </section>
 
     <section class="card">
+      <h2>Connections &amp; NIFTY market data</h2>
+      <p>This panel reads market data only. It cannot place a real order.</p>
+      <div class="grid">
+        <div>
+          <h3>Angel One</h3>
+          <p>Status: <span class="{{ 'safe' if connections.angel_status == 'connected' else 'blocked' }}">{{ connections.angel_status }}</span></p>
+          <p>Client: <code>{{ connections.angel_client }}</code></p>
+          <form method="post" action="/actions/angel-connect"><button type="submit">Test Angel connection</button></form>
+        </div>
+        <div>
+          <h3>NIFTY</h3>
+          <p>Spot: <strong>{{ '%.2f'|format(connections.nifty_price) if connections.nifty_price else 'Not loaded' }}</strong></p>
+          <p>Updated: {{ connections.quote_observed_at.strftime('%Y-%m-%d %H:%M:%S %Z') if connections.quote_observed_at else 'Never' }}</p>
+          <p>Refresh: every 15 seconds after connection</p>
+          <form id="nifty-refresh-form" method="post" action="/actions/nifty-refresh"><button class="secondary" type="submit">Refresh NIFTY</button></form>
+        </div>
+        <div>
+          <h3>Telegram alerts</h3>
+          <p>Status: <span class="{{ 'safe' if connections.telegram_status == 'connected' else 'blocked' }}">{{ connections.telegram_status }}</span></p>
+          <form method="post" action="/actions/telegram-test"><button class="secondary" type="submit">Send test alert</button></form>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>UI-driven actions</h2>
       <p>These buttons are paper-safe. The scan button does not place orders until market-data and confirmation flows are wired.</p>
       <div class="actions">
@@ -96,5 +121,10 @@
       {% endif %}
     </section>
   </main>
+  {% if connections.angel_status == 'connected' %}
+  <script>
+    window.setTimeout(() => document.getElementById('nifty-refresh-form').requestSubmit(), 15000);
+  </script>
+  {% endif %}
 </body>
 </html>
