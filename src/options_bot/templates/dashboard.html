@@ -66,6 +66,7 @@
           <h3>Angel One</h3>
           <p>Status: <span class="{{ 'safe' if connections.angel_status == 'connected' else 'blocked' }}">{{ connections.angel_status }}</span></p>
           <p>Client: <code>{{ connections.angel_client }}</code></p>
+          {% if connections.angel_error %}<p class="blocked">Reason: {{ connections.angel_error }}</p>{% endif %}
           <form method="post" action="/actions/angel-connect"><button type="submit">Test Angel connection</button></form>
         </div>
         <div>

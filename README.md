@@ -138,6 +138,8 @@ Fill `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PASSWORD`, `ANGEL_TOTP_SECRET`
 
 In the dashboard, use **Test Angel connection** before **Refresh NIFTY**. A connected dashboard refreshes the market-data-only NIFTY quote every 15 seconds. Use **Send test alert** to verify one-way Telegram notifications; Telegram commands and live order execution remain disabled.
 
+If Angel One rejects the connection, the panel shows Angel's error code and a credential-redacted reason. Share that displayed reason when troubleshooting, never the contents of `credentials.env`.
+
 ## Functional modules
 
 ```text

@@ -30,6 +30,7 @@ class ConnectionSnapshot:
     nifty_price: float | None = None
     quote_observed_at: datetime | None = None
     last_message: str | None = None
+    angel_error: str | None = None
 
 
 def _smart_api_factory(api_key: str) -> object:
@@ -44,6 +45,23 @@ def _masked(value: str) -> str:
     if len(value) <= 4:
         return "•" * len(value)
     return f"{'•' * (len(value) - 4)}{value[-4:]}"
+
+
+def _safe_detail(value: object, secrets: tuple[str, ...]) -> str:
+    detail = " ".join(str(value).split())
+    for secret in secrets:
+        if secret:
+            detail = detail.replace(secret, "[redacted]")
+    return detail[:180]
+
+
+def _rejection_detail(response: object, secrets: tuple[str, ...]) -> str:
+    if not isinstance(response, dict):
+        return "Angel One returned an unexpected login response"
+    error_code = _safe_detail(response.get("errorcode", ""), secrets)
+    message = _safe_detail(response.get("message", ""), secrets)
+    parts = [part for part in (error_code, message) if part]
+    return " · ".join(parts) or "Angel One rejected the login without an error description"
 
 
 class ConnectionManager:
@@ -75,6 +93,7 @@ class ConnectionManager:
         if any(not credentials.get(name, "").strip() for name in required):
             raise ConnectionActionError("Angel One credentials are incomplete")
         client_code = credentials["ANGEL_CLIENT_CODE"].strip()
+        secret_values = tuple(credentials.get(name, "").strip() for name in required)
         try:
             smart_api = self._smart_api_factory(credentials["ANGEL_API_KEY"].strip())
             totp = self._totp_factory(credentials["ANGEL_TOTP_SECRET"].strip())
@@ -84,29 +103,36 @@ class ConnectionManager:
                 totp,
             )
         except Exception as exc:
+            detail = _safe_detail(f"{type(exc).__name__}: {exc}", secret_values)
+            message = f"Angel One connection failed · {detail}"
             with self._lock:
                 self._snapshot = replace(
                     self._snapshot,
                     angel_status="connection failed",
                     angel_client=_masked(client_code),
-                    last_message="Angel One connection failed",
+                    angel_error=detail,
+                    last_message=message,
                 )
-            raise ConnectionActionError("Angel One connection failed") from exc
+            raise ConnectionActionError(message) from exc
         if not isinstance(response, dict) or response.get("status") is False or not response.get("data"):
+            detail = _rejection_detail(response, secret_values)
+            message = f"Angel One rejected the login · {detail}"
             with self._lock:
                 self._snapshot = replace(
                     self._snapshot,
                     angel_status="connection failed",
                     angel_client=_masked(client_code),
-                    last_message="Angel One rejected the login",
+                    angel_error=detail,
+                    last_message=message,
                 )
-            raise ConnectionActionError("Angel One rejected the login")
+            raise ConnectionActionError(message)
         with self._lock:
             self._smart_api = smart_api
             self._snapshot = replace(
                 self._snapshot,
                 angel_status="connected",
                 angel_client=_masked(client_code),
+                angel_error=None,
                 last_message="Angel One connected in market-data-only mode",
             )
             return self._snapshot

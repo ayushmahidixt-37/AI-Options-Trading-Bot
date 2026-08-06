@@ -82,6 +82,32 @@ def test_incomplete_angel_credentials_fail_without_factory_call(tmp_path: Path) 
     assert called is False
 
 
+def test_rejected_login_shows_safe_angel_error_code_and_message(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+
+    class RejectingApi:
+        def generateSession(self, *_args):
+            return {
+                "status": False,
+                "errorcode": "AB1234",
+                "message": "Invalid credentials for CLIENT1234 using api-key",
+            }
+
+    manager = ConnectionManager(
+        settings(tmp_path, credentials),
+        smart_api_factory=lambda _api_key: RejectingApi(),
+        totp_factory=lambda _secret: "123456",
+    )
+
+    with pytest.raises(ConnectionActionError, match="AB1234") as error:
+        manager.connect_angel()
+
+    snapshot = manager.snapshot()
+    assert snapshot.angel_error == "AB1234 · Invalid credentials for [redacted] using [redacted]"
+    assert "CLIENT1234" not in str(error.value)
+    assert "api-key" not in str(error.value)
+
+
 def test_sends_alert_only_telegram_message(tmp_path: Path) -> None:
     credentials = credential_file(tmp_path)
     messages: list[str] = []
