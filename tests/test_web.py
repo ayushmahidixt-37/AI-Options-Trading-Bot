@@ -33,6 +33,20 @@ def test_web_dashboard_requires_password(tmp_path: Path) -> None:
     assert response.status_code == 401
 
 
+def test_web_lifespan_starts_and_stops_background_monitor(tmp_path: Path) -> None:
+    cfg = settings(tmp_path)
+    connections = ConnectionManager(cfg)
+    events: list[str] = []
+    connections.start_background_monitor = lambda: events.append("start")  # type: ignore[method-assign]
+    connections.stop_background_monitor = lambda: events.append("stop")  # type: ignore[method-assign]
+
+    with TestClient(create_web_app(cfg, "secret", connections)) as client:
+        assert client.get("/", auth=auth()).status_code == 200
+        assert events == ["start"]
+
+    assert events == ["start", "stop"]
+
+
 def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
     client = TestClient(create_web_app(settings(tmp_path), "secret"))
 

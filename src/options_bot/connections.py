@@ -53,6 +53,9 @@ class ConnectionSnapshot:
     signal_label: str = "NOT LOADED"
     signal_confidence: float | None = None
     signal_reason: str = "Load five-minute candles to calculate a read-only signal."
+    monitor_status: str = "stopped"
+    monitor_last_run_at: datetime | None = None
+    monitor_error: str | None = None
 
 
 def _smart_api_factory(api_key: str) -> object:
@@ -167,10 +170,78 @@ class ConnectionManager:
         self._snapshot = ConnectionSnapshot()
         self._last_alerted_signal: str | None = None
         self._last_intelligence_bucket: datetime | None = None
+        self._monitor_stop = threading.Event()
+        self._monitor_thread: threading.Thread | None = None
 
     def snapshot(self) -> ConnectionSnapshot:
         with self._lock:
             return self._snapshot
+
+    def start_background_monitor(self, interval_seconds: float = 15) -> None:
+        """Start one read-only market-data worker for this application process."""
+        if interval_seconds <= 0:
+            raise ValueError("Background monitor interval must be positive")
+        with self._lock:
+            if self._monitor_thread is not None and self._monitor_thread.is_alive():
+                return
+            self._monitor_stop.clear()
+            self._snapshot = replace(
+                self._snapshot,
+                monitor_status="starting",
+                monitor_error=None,
+            )
+            worker = threading.Thread(
+                target=self._monitor_loop,
+                args=(interval_seconds,),
+                name="nifty-read-only-monitor",
+                daemon=True,
+            )
+            self._monitor_thread = worker
+            worker.start()
+
+    def stop_background_monitor(self, timeout_seconds: float = 5) -> None:
+        """Stop the worker without leaving a non-daemon shutdown dependency."""
+        self._monitor_stop.set()
+        with self._lock:
+            worker = self._monitor_thread
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(timeout_seconds)
+        with self._lock:
+            self._monitor_thread = None
+            self._snapshot = replace(self._snapshot, monitor_status="stopped")
+
+    def run_background_cycle(self, observed_at: datetime | None = None) -> ConnectionSnapshot:
+        """Run one safe cycle; useful for the worker and deterministic checks."""
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        with self._lock:
+            connected = self._smart_api is not None
+        if not connected:
+            self.connect_angel()
+        self.refresh_nifty()
+        self.refresh_intelligence_if_due(now)
+        with self._lock:
+            self._snapshot = replace(
+                self._snapshot,
+                monitor_status="running",
+                monitor_last_run_at=now,
+                monitor_error=None,
+            )
+            return self._snapshot
+
+    def _monitor_loop(self, interval_seconds: float) -> None:
+        while not self._monitor_stop.is_set():
+            try:
+                self.run_background_cycle()
+            except (ConnectionActionError, FileNotFoundError, ValueError) as exc:
+                with self._lock:
+                    self._snapshot = replace(
+                        self._snapshot,
+                        monitor_status="retrying",
+                        monitor_error=_safe_detail(str(exc), ()),
+                    )
+            self._monitor_stop.wait(interval_seconds)
 
     def connect_angel(self) -> ConnectionSnapshot:
         credentials = load_credentials(self._settings.credentials_path)

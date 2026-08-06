@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
@@ -24,13 +25,30 @@ def create_web_app(
     settings: Settings,
     password: str,
     connection_manager: ConnectionManager | None = None,
+    start_background_monitor: bool = True,
 ) -> FastAPI:
     if not password:
         raise ValueError("A web UI password is required")
     application = build_application(settings)
     connections = connection_manager or ConnectionManager(settings)
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
-    app = FastAPI(title="AI Options Trading Bot", docs_url=None, redoc_url=None)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if start_background_monitor:
+            connections.start_background_monitor()
+        try:
+            yield
+        finally:
+            if start_background_monitor:
+                connections.stop_background_monitor()
+
+    app = FastAPI(
+        title="AI Options Trading Bot",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
 
     def require_login(credentials: HTTPBasicCredentials = Depends(security)) -> str:
         valid_user = secrets.compare_digest(credentials.username, "admin")

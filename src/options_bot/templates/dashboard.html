@@ -61,6 +61,9 @@
     <section class="card">
       <h2>NIFTY five-minute market intelligence</h2>
       <p>Read-only analysis from closed Angel One candles. This section cannot place an order.</p>
+      <p>Background monitor: <span class="{{ 'safe' if connections.monitor_status == 'running' else 'blocked' }}">{{ connections.monitor_status }}</span>
+        · Last cycle: {{ connections.monitor_last_run_at.strftime('%Y-%m-%d %H:%M:%S %Z') if connections.monitor_last_run_at else 'Not run yet' }}</p>
+      {% if connections.monitor_error %}<p class="blocked">Monitor will retry automatically: {{ connections.monitor_error }}</p>{% endif %}
       <div class="grid">
         <div>
           <h3>Session &amp; data</h3>
@@ -156,7 +159,7 @@
   </main>
   {% if connections.angel_status == 'connected' %}
   <script>
-    window.setTimeout(() => document.getElementById('nifty-refresh-form').requestSubmit(), 15000);
+    window.setTimeout(() => window.location.reload(), 15000);
   </script>
   {% endif %}
 </body>

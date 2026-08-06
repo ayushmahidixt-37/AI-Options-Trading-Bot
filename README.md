@@ -162,6 +162,8 @@ The callback page does not run the bot and is not a substitute for any static ou
 
 After **Test Angel connection** succeeds, use **Refresh NIFTY** or **Refresh 5-minute analysis** to load up to 100 closed NIFTY candles from Angel One. Spot quotes continue every 15 seconds, while historical analysis is rate-limited to once per five-minute bucket. The dashboard calculates EMA 9, EMA 21, RSI 14, ATR 14, candle freshness, and a plain-language signal. The currently forming candle is excluded, malformed or out-of-order data fails closed, and no order is placed. Telegram sends an alert only when an actionable `BULLISH`, `BEARISH`, or `NO TRADE` state changes.
 
+The web process also starts a read-only background monitor. It reconnects to Angel One when needed, refreshes spot data every 15 seconds, and evaluates at most once per five-minute bucket even when Chrome is closed. The dashboard reload only displays the latest in-memory snapshot; it does not drive the monitor. Keep Termux and the `options-bot web` process running, and disable Android battery optimization for Termux if Android suspends it. This monitor has no order-placement call and does not change the `AUTO_START=false` or `LIVE_TRADING_ENABLED=false` safety requirements.
+
 ## Functional modules
 
 ```text

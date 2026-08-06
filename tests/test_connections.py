@@ -264,6 +264,38 @@ def test_refreshes_closed_five_minute_intelligence_and_suppresses_duplicate_aler
     assert "no order was placed" in messages[0]
 
 
+def test_background_cycle_connects_and_refreshes_read_only_data(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+    now = datetime(2026, 8, 6, 13, 53, tzinfo=IST)
+
+    class FakeApi:
+        def generateSession(self, *_args):
+            return {"status": True, "data": {"jwtToken": "secret"}}
+
+        def getMarketData(self, *_args):
+            return {"status": True, "data": {"fetched": [{"ltp": 24629.4}]}}
+
+        def getCandleData(self, _payload):
+            return {"status": True, "data": candle_rows(now)}
+
+    manager = ConnectionManager(
+        settings(tmp_path, credentials),
+        smart_api_factory=lambda _api_key: FakeApi(),
+        totp_factory=lambda _secret: "123456",
+        notifier_factory=lambda _token, _chat: type(
+            "Notifier", (), {"send": lambda self, _text: None}
+        )(),
+    )
+
+    snapshot = manager.run_background_cycle(now)
+
+    assert snapshot.monitor_status == "running"
+    assert snapshot.monitor_last_run_at == now
+    assert snapshot.monitor_error is None
+    assert snapshot.nifty_price == 24629.4
+    assert snapshot.intelligence_status == "ready"
+
+
 def test_candle_parser_rejects_duplicates_and_excludes_forming_candle() -> None:
     now = datetime(2026, 8, 6, 13, 53, tzinfo=IST)
     rows = candle_rows(now, 3)
