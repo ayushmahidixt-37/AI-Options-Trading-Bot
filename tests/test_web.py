@@ -83,6 +83,27 @@ def test_web_connection_actions_show_nifty_and_telegram_status(tmp_path: Path) -
         def ltpData(self, *_args):
             return {"status": True, "data": {"ltp": 24600}}
 
+        def getCandleData(self, _payload):
+            now = datetime.now(IST)
+            bucket = now.replace(minute=now.minute - now.minute % 5, second=0, microsecond=0)
+            rows = []
+            close = 24500.0
+            for index in range(60):
+                open_price = close
+                close += (1.0, 1.0, -1.0)[index % 3]
+                started_at = bucket - timedelta(minutes=5 * (59 - index))
+                rows.append(
+                    [
+                        started_at.isoformat(),
+                        open_price,
+                        max(open_price, close) + 2,
+                        min(open_price, close) - 2,
+                        close,
+                        1000,
+                    ]
+                )
+            return {"status": True, "data": rows}
+
     class FakeNotifier:
         def send(self, _text: str) -> None:
             return None
@@ -97,11 +118,16 @@ def test_web_connection_actions_show_nifty_and_telegram_status(tmp_path: Path) -
 
     assert client.post("/actions/angel-connect", auth=auth()).status_code == 200
     quote = client.post("/actions/nifty-refresh", auth=auth())
+    intelligence = client.post("/actions/intelligence-refresh", auth=auth())
     telegram = client.post("/actions/telegram-test", auth=auth())
 
     assert "24600.00" in quote.text
     assert "NIFTY quote refreshed" in quote.text
     assert "15000" in quote.text
+    assert "NIFTY five-minute market intelligence" in intelligence.text
+    assert "EMA 9" in intelligence.text
+    assert "BULLISH" in intelligence.text
+    assert "no order was placed" in intelligence.text
     assert "Telegram test alert sent" in telegram.text
 
 

@@ -91,6 +91,26 @@ def create_web_app(
     def refresh_nifty(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
         try:
             result = connections.refresh_nifty()
+            try:
+                connections.refresh_intelligence_if_due()
+            except ConnectionActionError:
+                pass
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, result.last_message, True),
+            )
+        except ConnectionActionError as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, str(exc), False),
+            )
+
+    @app.post("/actions/intelligence-refresh", response_class=HTMLResponse)
+    def refresh_intelligence(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
+        try:
+            result = connections.refresh_intelligence()
             return templates.TemplateResponse(
                 request=request,
                 name="dashboard.html",

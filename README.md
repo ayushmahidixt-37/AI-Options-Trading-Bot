@@ -158,6 +158,10 @@ https://ayushmahidixt-37.github.io/AI-Options-Trading-Bot/angel-callback/
 
 The callback page does not run the bot and is not a substitute for any static outbound IP Angel requires. The bot continues to authenticate with SmartAPI's direct session API from Termux.
 
+### Read-only five-minute intelligence
+
+After **Test Angel connection** succeeds, use **Refresh NIFTY** or **Refresh 5-minute analysis** to load up to 100 closed NIFTY candles from Angel One. Spot quotes continue every 15 seconds, while historical analysis is rate-limited to once per five-minute bucket. The dashboard calculates EMA 9, EMA 21, RSI 14, ATR 14, candle freshness, and a plain-language signal. The currently forming candle is excluded, malformed or out-of-order data fails closed, and no order is placed. Telegram sends an alert only when an actionable `BULLISH`, `BEARISH`, or `NO TRADE` state changes.
+
 ## Functional modules
 
 ```text

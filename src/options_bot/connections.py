@@ -5,18 +5,25 @@ from __future__ import annotations
 import threading
 import logging
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, time, timedelta, tzinfo
 from typing import Callable
 
 import pyotp
 
+from .candles import Candle
 from .config import Settings
 from .credentials import load_credentials
+from .indicators import atr, ema, rsi
 from .notifications import TelegramNotifier
+from .strategy import MomentumStrategy
 
 NIFTY_EXCHANGE = "NSE"
 NIFTY_SYMBOL = "Nifty 50"
 NIFTY_TOKEN = "99926000"
+NIFTY_CANDLE_INTERVAL = "FIVE_MINUTE"
+NIFTY_CANDLE_LIMIT = 100
+MARKET_OPEN = time(9, 15)
+MARKET_CLOSE = time(15, 30)
 
 
 class ConnectionActionError(RuntimeError):
@@ -33,6 +40,19 @@ class ConnectionSnapshot:
     quote_error: str | None = None
     last_message: str | None = None
     angel_error: str | None = None
+    intelligence_status: str = "not loaded"
+    intelligence_error: str | None = None
+    market_status: str = "unknown"
+    candle_count: int = 0
+    latest_candle_at: datetime | None = None
+    data_status: str = "not loaded"
+    ema_fast: float | None = None
+    ema_slow: float | None = None
+    rsi_value: float | None = None
+    atr_value: float | None = None
+    signal_label: str = "NOT LOADED"
+    signal_confidence: float | None = None
+    signal_reason: str = "Load five-minute candles to calculate a read-only signal."
 
 
 def _smart_api_factory(api_key: str) -> object:
@@ -90,6 +110,43 @@ def _quote_price(response: object) -> float:
     return price
 
 
+def _parse_candle_timestamp(value: object, timezone: tzinfo) -> datetime:
+    timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone)
+    return timestamp.astimezone(timezone)
+
+
+def _closed_five_minute_candles(
+    rows: object,
+    *,
+    now: datetime,
+    timezone: tzinfo,
+) -> list[Candle]:
+    if not isinstance(rows, list):
+        raise ValueError("Angel One returned no candle list")
+    bucket_minute = now.minute - now.minute % 5
+    current_bucket = now.replace(minute=bucket_minute, second=0, microsecond=0)
+    candles: list[Candle] = []
+    previous: datetime | None = None
+    for row in rows:
+        if not isinstance(row, list) or len(row) < 5:
+            raise ValueError("Angel One returned a malformed candle")
+        started_at = _parse_candle_timestamp(row[0], timezone)
+        if previous is not None and started_at <= previous:
+            raise ValueError("Angel One returned duplicate or out-of-order candles")
+        previous = started_at
+        if started_at >= current_bucket:
+            continue
+        open_price, high, low, close = (float(value) for value in row[1:5])
+        if min(open_price, high, low, close) <= 0:
+            raise ValueError("Angel One returned a non-positive candle price")
+        if high < max(open_price, close) or low > min(open_price, close) or high < low:
+            raise ValueError("Angel One returned inconsistent OHLC values")
+        candles.append(Candle(NIFTY_SYMBOL, started_at, open_price, high, low, close))
+    return candles[-NIFTY_CANDLE_LIMIT:]
+
+
 class ConnectionManager:
     """Own authenticated data-only sessions without exposing credential values."""
 
@@ -108,6 +165,8 @@ class ConnectionManager:
         self._smart_api: object | None = None
         self._lock = threading.RLock()
         self._snapshot = ConnectionSnapshot()
+        self._last_alerted_signal: str | None = None
+        self._last_intelligence_bucket: datetime | None = None
 
     def snapshot(self) -> ConnectionSnapshot:
         with self._lock:
@@ -154,6 +213,7 @@ class ConnectionManager:
             raise ConnectionActionError(message)
         with self._lock:
             self._smart_api = smart_api
+            self._last_intelligence_bucket = None
             self._snapshot = replace(
                 self._snapshot,
                 angel_status="connected",
@@ -221,6 +281,156 @@ class ConnectionManager:
                 last_message="NIFTY quote refreshed",
             )
             return self._snapshot
+
+    def refresh_intelligence_if_due(
+        self, observed_at: datetime | None = None
+    ) -> ConnectionSnapshot:
+        """Refresh once per five-minute bucket while spot quotes update faster."""
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        bucket = now.replace(minute=now.minute - now.minute % 5, second=0, microsecond=0)
+        with self._lock:
+            if bucket == self._last_intelligence_bucket:
+                return self._snapshot
+            self._last_intelligence_bucket = bucket
+        return self.refresh_intelligence(now)
+
+    def refresh_intelligence(self, observed_at: datetime | None = None) -> ConnectionSnapshot:
+        """Load closed five-minute candles and calculate a read-only NIFTY signal."""
+        with self._lock:
+            smart_api = self._smart_api
+        if smart_api is None:
+            raise ConnectionActionError("Connect Angel One before loading market intelligence")
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        credentials = load_credentials(self._settings.credentials_path)
+        secrets = tuple(value.strip() for value in credentials.values() if value.strip())
+        try:
+            response = getattr(smart_api, "getCandleData")(
+                {
+                    "exchange": NIFTY_EXCHANGE,
+                    "symboltoken": NIFTY_TOKEN,
+                    "interval": NIFTY_CANDLE_INTERVAL,
+                    "fromdate": (now - timedelta(days=7)).strftime("%Y-%m-%d %H:%M"),
+                    "todate": now.strftime("%Y-%m-%d %H:%M"),
+                }
+            )
+            if not isinstance(response, dict) or response.get("status") is False:
+                raise ValueError(_rejection_detail(response, secrets))
+            candles = _closed_five_minute_candles(
+                response.get("data"), now=now, timezone=self._settings.timezone
+            )
+            if not candles:
+                raise ValueError("Angel One returned no closed five-minute candles")
+            snapshot = self._intelligence_snapshot(candles, now)
+        except Exception as exc:
+            detail = _safe_detail(f"{type(exc).__name__}: {exc}", secrets)
+            message = f"NIFTY intelligence refresh failed · {detail}"
+            with self._lock:
+                self._snapshot = replace(
+                    self._snapshot,
+                    intelligence_status="failed",
+                    intelligence_error=detail,
+                    last_message=message,
+                )
+            raise ConnectionActionError(message) from exc
+        with self._lock:
+            self._last_intelligence_bucket = now.replace(
+                minute=now.minute - now.minute % 5, second=0, microsecond=0
+            )
+            self._snapshot = replace(self._snapshot, **snapshot)
+            result = self._snapshot
+        self._send_signal_change_alert(result, credentials)
+        return result
+
+    def _intelligence_snapshot(
+        self, candles: list[Candle], now: datetime
+    ) -> dict[str, object]:
+        closes = [candle.close for candle in candles]
+        fast = ema(closes, 9)[-1]
+        slow = ema(closes, 21)[-1]
+        momentum = rsi(closes, 14)[-1]
+        volatility = atr(
+            [candle.high for candle in candles],
+            [candle.low for candle in candles],
+            closes,
+            14,
+        )
+        latest = candles[-1].started_at
+        in_session = now.weekday() < 5 and MARKET_OPEN <= now.time() < MARKET_CLOSE
+        market_status = "OPEN" if in_session else "CLOSED"
+        age = now - latest
+        data_status = "fresh" if in_session and age <= timedelta(minutes=10) else "stale"
+        if not in_session:
+            data_status = "last closed session"
+
+        strategy = MomentumStrategy()
+        signal = strategy.evaluate(candles)
+        if len(candles) < strategy.minimum_candles:
+            label = "INSUFFICIENT DATA"
+            confidence = None
+            reason = f"Need {strategy.minimum_candles} closed candles; loaded {len(candles)}."
+        elif in_session and data_status == "stale":
+            label = "STALE DATA"
+            confidence = None
+            reason = "Latest closed candle is more than 10 minutes old during the session."
+        elif not in_session:
+            label = "MARKET CLOSED"
+            confidence = None
+            reason = "Outside the weekday 09:15–15:30 IST session window."
+        elif signal is None:
+            label = "NO TRADE"
+            confidence = None
+            reason = "EMA trend and RSI conditions do not currently align."
+        else:
+            label = signal.direction.value.upper()
+            confidence = signal.confidence
+            reason = signal.reason
+        return {
+            "intelligence_status": "ready",
+            "intelligence_error": None,
+            "market_status": market_status,
+            "candle_count": len(candles),
+            "latest_candle_at": latest,
+            "data_status": data_status,
+            "ema_fast": fast,
+            "ema_slow": slow,
+            "rsi_value": momentum,
+            "atr_value": volatility,
+            "signal_label": label,
+            "signal_confidence": confidence,
+            "signal_reason": reason,
+            "last_message": "NIFTY five-minute intelligence refreshed; no order was placed",
+        }
+
+    def _send_signal_change_alert(
+        self, snapshot: ConnectionSnapshot, credentials: dict[str, str]
+    ) -> None:
+        alertable = {"BULLISH", "BEARISH", "NO TRADE"}
+        if snapshot.signal_label not in alertable:
+            return
+        with self._lock:
+            if snapshot.signal_label == self._last_alerted_signal:
+                return
+        token = credentials.get("TELEGRAM_BOT_TOKEN", "").strip()
+        chat_id = credentials.get("TELEGRAM_CHAT_ID", "").strip()
+        if not token or not chat_id:
+            return
+        try:
+            self._notifier_factory(token, chat_id).send(
+                "NIFTY 5-minute signal: "
+                f"{snapshot.signal_label}. {snapshot.signal_reason} "
+                "Read-only paper analysis; no order was placed."
+            )
+        except Exception:
+            with self._lock:
+                self._snapshot = replace(self._snapshot, telegram_status="signal alert failed")
+            return
+        with self._lock:
+            self._last_alerted_signal = snapshot.signal_label
+            self._snapshot = replace(self._snapshot, telegram_status="connected")
 
     def test_telegram(self) -> ConnectionSnapshot:
         credentials = load_credentials(self._settings.credentials_path)

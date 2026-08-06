@@ -32,17 +32,16 @@ def run_health_action(application: Application) -> ActionResult:
 def run_paper_scan_action(application: Application) -> ActionResult:
     """Perform a safe scan placeholder without placing an order.
 
-    The current project has strategy, candle, and paper-broker primitives, but no
-    authenticated live market-data session is composed into the service yet. This
-    action intentionally does not buy anything; it gives the UI a safe operator
-    button while the market-data task flow is designed.
+    The dashboard now has read-only NIFTY quotes and five-minute analysis, but
+    option discovery and a confirmed paper-entry workflow are not wired yet.
+    This action intentionally does not buy anything.
     """
     report = healthcheck(application.settings, application.ledger)
     if not report.ok:
         return ActionResult(False, "Paper scan blocked because healthcheck failed")
     return ActionResult(
         True,
-        "Paper scan is ready, but live market-data scanning is not wired yet; no order was placed.",
+        "Paper scan is ready, but option discovery is not wired yet; no order was placed.",
     )
 
 

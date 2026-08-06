@@ -59,6 +59,37 @@
     </section>
 
     <section class="card">
+      <h2>NIFTY five-minute market intelligence</h2>
+      <p>Read-only analysis from closed Angel One candles. This section cannot place an order.</p>
+      <div class="grid">
+        <div>
+          <h3>Session &amp; data</h3>
+          <p>Session window: <span class="{{ 'safe' if connections.market_status == 'OPEN' else 'blocked' }}">{{ connections.market_status }}</span></p>
+          <p>Timeframe: <strong>5 minutes</strong></p>
+          <p>Candles loaded: {{ connections.candle_count }}</p>
+          <p>Latest closed candle: {{ connections.latest_candle_at.strftime('%Y-%m-%d %H:%M:%S %Z') if connections.latest_candle_at else 'Not loaded' }}</p>
+          <p>Data: <span class="{{ 'safe' if connections.data_status == 'fresh' else 'blocked' }}">{{ connections.data_status }}</span></p>
+        </div>
+        <div>
+          <h3>Indicators</h3>
+          <p>EMA 9: {{ '%.2f'|format(connections.ema_fast) if connections.ema_fast is not none else 'Not loaded' }}</p>
+          <p>EMA 21: {{ '%.2f'|format(connections.ema_slow) if connections.ema_slow is not none else 'Not loaded' }}</p>
+          <p>RSI 14: {{ '%.2f'|format(connections.rsi_value) if connections.rsi_value is not none else 'Not loaded' }}</p>
+          <p>ATR 14: {{ '%.2f'|format(connections.atr_value) if connections.atr_value is not none else 'Not loaded' }}</p>
+        </div>
+        <div>
+          <h3>Read-only signal</h3>
+          <p>Signal: <span class="{{ 'safe' if connections.signal_label in ['BULLISH', 'BEARISH'] else 'blocked' }}">{{ connections.signal_label }}</span></p>
+          <p>Confidence: {{ '%.0f%%'|format(connections.signal_confidence * 100) if connections.signal_confidence is not none else 'Not available' }}</p>
+          <p>Reason: {{ connections.signal_reason }}</p>
+          {% if connections.intelligence_error %}<p class="blocked">Error: {{ connections.intelligence_error }}</p>{% endif %}
+          <form method="post" action="/actions/intelligence-refresh"><button class="secondary" type="submit">Refresh 5-minute analysis</button></form>
+        </div>
+      </div>
+      <p><small>Session status uses the weekday 09:15–15:30 IST window; exchange holiday detection is not yet connected.</small></p>
+    </section>
+
+    <section class="card">
       <h2>Connections &amp; NIFTY market data</h2>
       <p>This panel reads market data only. It cannot place a real order.</p>
       <div class="grid">
