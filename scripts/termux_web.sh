@@ -33,11 +33,11 @@ cd "${APP_DIR}"
 git pull --ff-only || true
 
 python -m pip install --upgrade pip setuptools wheel
-if ! python -m pip install -e '.[dev]'; then
-  echo "Standard install failed; installing Rust/Python build backend helpers and retrying." >&2
-  python -m pip install --upgrade maturin
-  python -m pip install --no-build-isolation -e '.[dev]'
-fi
+
+# Install only what is needed to run the dashboard. The dev extra includes Ruff,
+# whose Rust release build can exceed the memory available on Android tablets.
+python -m pip install fastapi jinja2 python-multipart uvicorn
+python -m pip install --no-deps -e .
 
 mkdir -p "${DATA_DIR}"
 if [[ ! -f ${CONFIG_FILE} ]]; then
@@ -54,8 +54,8 @@ path.write_text(text, encoding="utf-8")
 PY
 fi
 
-python -m compileall -q src tests
-pytest -q
+python -m compileall -q src
+python -c "import fastapi, jinja2, uvicorn; import options_bot"
 
 echo
 echo "Starting AI Options Trading Bot web UI..."
