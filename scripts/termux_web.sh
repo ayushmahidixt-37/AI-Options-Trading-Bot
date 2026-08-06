@@ -42,7 +42,7 @@ python -m pip install --no-deps -e .
 mkdir -p "${DATA_DIR}"
 if [[ ! -f ${CONFIG_FILE} ]]; then
   cp bot.env.example "${CONFIG_FILE}"
-  python - <<'PY'
+  CONFIG_FILE="${CONFIG_FILE}" DATA_DIR="${DATA_DIR}" python - <<'PY'
 import os
 from pathlib import Path
 path = Path(os.environ["CONFIG_FILE"])
