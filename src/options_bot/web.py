@@ -12,6 +12,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 from .actions import close_paper_position_action, run_health_action, run_paper_scan_action, status_snapshot
+from .backtest import BacktestResult, run_momentum_backtest
 from .connections import ConnectionActionError, ConnectionManager
 from .runner import build_application
 from .config import Settings
@@ -32,6 +33,7 @@ def create_web_app(
     application = build_application(settings)
     connections = connection_manager or ConnectionManager(settings)
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+    latest_backtest: BacktestResult | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -71,6 +73,7 @@ def create_web_app(
             "positions": snapshot["positions"],
             "health": report,
             "connections": connections.snapshot(),
+            "backtest": latest_backtest,
             "message": message,
             "ok": ok,
         }
@@ -174,6 +177,20 @@ def create_web_app(
             target,
             filename=target.name,
             media_type="application/vnd.sqlite3",
+        )
+
+    @app.post("/actions/backtest", response_class=HTMLResponse)
+    def run_backtest(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
+        nonlocal latest_backtest
+        latest_backtest = run_momentum_backtest(connections.archive)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(
+                request,
+                "Backtest completed" if latest_backtest.trades else latest_backtest.reason,
+                latest_backtest.trades > 0,
+            ),
         )
 
     @app.post("/actions/telegram-test", response_class=HTMLResponse)

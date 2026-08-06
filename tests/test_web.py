@@ -149,6 +149,10 @@ def test_web_connection_actions_show_nifty_and_telegram_status(tmp_path: Path) -
     assert "instrument_token,symbol" in csv_export.text
     assert backup.status_code == 200
     assert backup.headers["content-type"] == "application/vnd.sqlite3"
+    backtest = client.post("/actions/backtest", auth=auth())
+    assert backtest.status_code == 200
+    assert "Offline backtest" in backtest.text
+    assert "INSUFFICIENT DATA" in backtest.text
 
 
 def test_web_can_close_existing_paper_position(tmp_path: Path) -> None:

@@ -99,7 +99,8 @@
         <div>
           <h3>Local database</h3>
           <p>Status: <span class="{{ 'safe' if connections.archive_status == 'ready' else 'blocked' }}">{{ connections.archive_status }}</span></p>
-          <p>NIFTY candles: {{ connections.archived_candles }}</p>
+          <p>NIFTY candles: {{ connections.archived_nifty_candles }}</p>
+          <p>Option candles: {{ connections.archived_option_candles }}</p>
           <p>Known NIFTY options: {{ connections.archived_instruments }}</p>
           <p>Size: {{ '%.2f'|format(connections.archive_bytes / 1048576) }} MB</p>
           <p>Possible intraday gaps: {{ connections.archive_gaps }}</p>
@@ -111,6 +112,9 @@
           <p>Newest candle: {{ connections.archive_newest_at or 'Not collected' }}</p>
           <p>Nearest archived expiry: {{ connections.nearest_expiry or 'Not loaded' }}</p>
           <p>Current ATM strike: {{ '%.2f'|format(connections.atm_strike) if connections.atm_strike is not none else 'Not loaded' }}</p>
+          <p>Option collection: <span class="{{ 'safe' if connections.option_archive_status == 'success' else 'blocked' }}">{{ connections.option_archive_status }}</span></p>
+          <p>Contracts tracked: {{ connections.option_contracts_tracked }}</p>
+          {% if connections.option_archive_error %}<p class="blocked">{{ connections.option_archive_error }}</p>{% endif %}
           <form method="post" action="/actions/instruments-refresh"><button class="secondary" type="submit">Refresh option instruments</button></form>
         </div>
         <div>
@@ -120,6 +124,15 @@
           <form method="post" action="/actions/archive-backup"><button class="secondary" type="submit">Download database backup</button></form>
         </div>
       </div>
+      <hr>
+      <h3>Offline backtest</h3>
+      <p>Uses only archived signals and option candles. It cannot call Angel One or place an order.</p>
+      <form method="post" action="/actions/backtest"><button class="secondary" type="submit">Run archived backtest</button></form>
+      {% if backtest %}
+        <p>Status: <strong>{{ backtest.status }}</strong> · Trades: {{ backtest.trades }} · Winners: {{ backtest.winners }} · Losers: {{ backtest.losers }}</p>
+        <p>Win rate: {{ '%.1f%%'|format(backtest.win_rate * 100) }} · Gross option points: {{ '%.2f'|format(backtest.gross_pnl_points) }}</p>
+        <p><small>{{ backtest.reason }}</small></p>
+      {% endif %}
     </section>
 
     <section class="card">

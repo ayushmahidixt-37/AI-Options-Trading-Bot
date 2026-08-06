@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from dataclasses import replace
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from options_bot.config import Settings
+from options_bot.domain import Instrument
 from options_bot.connections import (
     ConnectionActionError,
     ConnectionManager,
@@ -332,6 +334,53 @@ def test_archives_current_nifty_option_instruments(tmp_path: Path) -> None:
     assert snapshot.archive_status == "ready"
     assert snapshot.archived_instruments == 1
     assert snapshot.nearest_expiry == "2026-08-13"
+
+
+def test_collects_bounded_nearest_expiry_option_candles(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+    now = datetime(2026, 8, 6, 13, 53, tzinfo=IST)
+    requests: list[str] = []
+
+    class FakeApi:
+        def generateSession(self, *_args):
+            return {"status": True, "data": {"jwtToken": "secret"}}
+
+        def getCandleData(self, payload):
+            requests.append(payload["symboltoken"])
+            return {"status": True, "data": candle_rows(now, 3)}
+
+    manager = ConnectionManager(
+        settings(tmp_path, credentials),
+        smart_api_factory=lambda _key: FakeApi(),
+        totp_factory=lambda _secret: "123456",
+        instrument_master_loader=lambda: [],
+        request_pause=lambda _seconds: None,
+    )
+    manager.connect_angel()
+    manager._snapshot = replace(manager.snapshot(), nifty_price=24620)
+    manager.archive.save_instruments(
+        [
+            Instrument(
+                f"NIFTY13AUG2624600{kind}",
+                kind,
+                "NFO",
+                "NIFTY",
+                kind,
+                75,
+                date(2026, 8, 13),
+                24600,
+            )
+            for kind in ("CE", "PE")
+        ],
+        now,
+    )
+
+    snapshot = manager.refresh_option_archive(now)
+
+    assert requests == ["CE", "PE"]
+    assert snapshot.option_archive_status == "success"
+    assert snapshot.option_contracts_tracked == 2
+    assert snapshot.archived_option_candles == 4
 
 
 def test_candle_parser_rejects_duplicates_and_excludes_forming_candle() -> None:

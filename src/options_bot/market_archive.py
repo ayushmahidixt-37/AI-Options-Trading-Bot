@@ -17,6 +17,8 @@ from .domain import Instrument
 @dataclass(frozen=True)
 class ArchiveStats:
     candle_count: int
+    nifty_candle_count: int
+    option_candle_count: int
     instrument_count: int
     oldest_candle_at: str | None
     newest_candle_at: str | None
@@ -208,6 +210,9 @@ class MarketArchive:
             candle = con.execute(
                 "SELECT COUNT(*), MIN(started_at), MAX(started_at) FROM market_candles"
             ).fetchone()
+            nifty_count = con.execute(
+                "SELECT COUNT(*) FROM market_candles WHERE instrument_token='99926000'"
+            ).fetchone()[0]
             instruments = con.execute("SELECT COUNT(*) FROM instruments").fetchone()[0]
             timestamps = [
                 datetime.fromisoformat(row[0])
@@ -224,6 +229,8 @@ class MarketArchive:
         )
         return ArchiveStats(
             candle_count=int(candle[0]),
+            nifty_candle_count=int(nifty_count),
+            option_candle_count=int(candle[0]) - int(nifty_count),
             instrument_count=int(instruments),
             oldest_candle_at=candle[1],
             newest_candle_at=candle[2],
@@ -248,6 +255,53 @@ class MarketArchive:
                 (expiry, spot),
             ).fetchone()
         return {"nearest_expiry": expiry, "atm_strike": strike[0] if strike else None}
+
+    def select_near_atm_options(
+        self, today: date, spot: float, strike_band: int = 5
+    ) -> list[Instrument]:
+        if spot <= 0 or strike_band < 0:
+            raise ValueError("spot must be positive and strike band non-negative")
+        with self.connect() as con:
+            expiry = con.execute(
+                """SELECT MIN(expiry) FROM instruments
+                   WHERE underlying='NIFTY' AND expiry>=?""",
+                (today.isoformat(),),
+            ).fetchone()[0]
+            if not expiry:
+                return []
+            strikes = [
+                float(row[0])
+                for row in con.execute(
+                    """SELECT DISTINCT strike FROM instruments
+                       WHERE underlying='NIFTY' AND expiry=? ORDER BY strike""",
+                    (expiry,),
+                )
+            ]
+            if not strikes:
+                return []
+            atm = min(range(len(strikes)), key=lambda index: abs(strikes[index] - spot))
+            selected = strikes[max(0, atm - strike_band) : atm + strike_band + 1]
+            placeholders = ",".join("?" for _ in selected)
+            rows = con.execute(
+                f"""SELECT symbol, token, exchange_name, underlying, option_type,
+                           lot_size, expiry, strike
+                    FROM instruments WHERE underlying='NIFTY' AND expiry=?
+                    AND strike IN ({placeholders}) ORDER BY strike, option_type""",
+                (expiry, *selected),
+            ).fetchall()
+        return [
+            Instrument(
+                symbol=row[0],
+                token=row[1],
+                exchange=row[2],
+                underlying=row[3],
+                option_type=row[4],
+                lot_size=int(row[5]),
+                expiry=date.fromisoformat(row[6]),
+                strike=float(row[7]),
+            )
+            for row in rows
+        ]
 
     def export_candles_csv(self, target: str | Path) -> Path:
         destination = Path(target)
