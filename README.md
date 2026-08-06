@@ -123,7 +123,7 @@ cd AI-Options-Trading-Bot
 scripts/termux_web.sh
 ```
 
-The script installs only the runtime packages needed by the dashboard, creates a tablet-local config under `.termux-data`, checks that the application imports, and starts the password-protected UI on `http://127.0.0.1:8000`. It intentionally does not install developer tools such as Ruff because compiling them can exceed a tablet's available memory. Open that URL in Chrome on the same tablet and sign in as `admin`.
+The script installs only the runtime packages needed by the dashboard (including the timezone database required by Android), creates a tablet-local config under `.termux-data`, checks that the application imports, and starts the password-protected UI on `http://127.0.0.1:8000`. It intentionally does not install developer tools such as Ruff because compiling them can exceed a tablet's available memory. Open that URL in Chrome on the same tablet and sign in as `admin`.
 
 ## Functional modules
 
