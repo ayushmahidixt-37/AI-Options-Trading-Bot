@@ -93,6 +93,36 @@
     </section>
 
     <section class="card">
+      <h2>Historical market archive</h2>
+      <p>Permanent SQLite storage for backtesting. Excel-compatible CSV is an export, not the master copy.</p>
+      <div class="grid">
+        <div>
+          <h3>Local database</h3>
+          <p>Status: <span class="{{ 'safe' if connections.archive_status == 'ready' else 'blocked' }}">{{ connections.archive_status }}</span></p>
+          <p>NIFTY candles: {{ connections.archived_candles }}</p>
+          <p>Known NIFTY options: {{ connections.archived_instruments }}</p>
+          <p>Size: {{ '%.2f'|format(connections.archive_bytes / 1048576) }} MB</p>
+          <p>Possible intraday gaps: {{ connections.archive_gaps }}</p>
+          {% if connections.archive_error %}<p class="blocked">{{ connections.archive_error }}</p>{% endif %}
+        </div>
+        <div>
+          <h3>Coverage</h3>
+          <p>Oldest candle: {{ connections.archive_oldest_at or 'Not collected' }}</p>
+          <p>Newest candle: {{ connections.archive_newest_at or 'Not collected' }}</p>
+          <p>Nearest archived expiry: {{ connections.nearest_expiry or 'Not loaded' }}</p>
+          <p>Current ATM strike: {{ '%.2f'|format(connections.atm_strike) if connections.atm_strike is not none else 'Not loaded' }}</p>
+          <form method="post" action="/actions/instruments-refresh"><button class="secondary" type="submit">Refresh option instruments</button></form>
+        </div>
+        <div>
+          <h3>Export &amp; backup</h3>
+          <p>Downloads do not remove or change the master database.</p>
+          <p><a href="/archive/candles.csv">Download candle CSV</a></p>
+          <form method="post" action="/actions/archive-backup"><button class="secondary" type="submit">Download database backup</button></form>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
       <h2>Connections &amp; NIFTY market data</h2>
       <p>This panel reads market data only. It cannot place a real order.</p>
       <div class="grid">

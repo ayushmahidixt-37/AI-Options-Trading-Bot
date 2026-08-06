@@ -143,6 +143,12 @@ def test_web_connection_actions_show_nifty_and_telegram_status(tmp_path: Path) -
     assert "BULLISH" in intelligence.text
     assert "no order was placed" in intelligence.text
     assert "Telegram test alert sent" in telegram.text
+    csv_export = client.get("/archive/candles.csv", auth=auth())
+    backup = client.post("/actions/archive-backup", auth=auth())
+    assert csv_export.status_code == 200
+    assert "instrument_token,symbol" in csv_export.text
+    assert backup.status_code == 200
+    assert backup.headers["content-type"] == "application/vnd.sqlite3"
 
 
 def test_web_can_close_existing_paper_position(tmp_path: Path) -> None:

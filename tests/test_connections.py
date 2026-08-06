@@ -282,6 +282,7 @@ def test_background_cycle_connects_and_refreshes_read_only_data(tmp_path: Path) 
         settings(tmp_path, credentials),
         smart_api_factory=lambda _api_key: FakeApi(),
         totp_factory=lambda _secret: "123456",
+        instrument_master_loader=lambda: [],
         notifier_factory=lambda _token, _chat: type(
             "Notifier", (), {"send": lambda self, _text: None}
         )(),
@@ -294,6 +295,43 @@ def test_background_cycle_connects_and_refreshes_read_only_data(tmp_path: Path) 
     assert snapshot.monitor_error is None
     assert snapshot.nifty_price == 24629.4
     assert snapshot.intelligence_status == "ready"
+
+
+def test_archives_current_nifty_option_instruments(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+    rows = [
+        {
+            "exch_seg": "NFO",
+            "instrumenttype": "OPTIDX",
+            "symbol": "NIFTY13AUG2624600CE",
+            "token": "123",
+            "name": "NIFTY",
+            "strike": "2460000",
+            "expiry": "13AUG2026",
+            "lotsize": "75",
+        },
+        {
+            "exch_seg": "NFO",
+            "instrumenttype": "OPTIDX",
+            "symbol": "BANKNIFTY13AUG2650000CE",
+            "token": "456",
+            "name": "BANKNIFTY",
+            "strike": "5000000",
+            "expiry": "13AUG2026",
+            "lotsize": "30",
+        },
+    ]
+    manager = ConnectionManager(
+        settings(tmp_path, credentials), instrument_master_loader=lambda: rows
+    )
+
+    snapshot = manager.refresh_instrument_archive(
+        datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+    )
+
+    assert snapshot.archive_status == "ready"
+    assert snapshot.archived_instruments == 1
+    assert snapshot.nearest_expiry == "2026-08-13"
 
 
 def test_candle_parser_rejects_duplicates_and_excludes_forming_candle() -> None:

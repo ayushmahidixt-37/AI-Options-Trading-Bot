@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import threading
 import logging
+import json
 from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta, tzinfo
 from typing import Callable
+from urllib.request import Request, urlopen
 
 import pyotp
 
@@ -14,6 +16,8 @@ from .candles import Candle
 from .config import Settings
 from .credentials import load_credentials
 from .indicators import atr, ema, rsi
+from .instruments import normalize_instruments
+from .market_archive import MarketArchive
 from .notifications import TelegramNotifier
 from .strategy import MomentumStrategy
 
@@ -24,6 +28,9 @@ NIFTY_CANDLE_INTERVAL = "FIVE_MINUTE"
 NIFTY_CANDLE_LIMIT = 100
 MARKET_OPEN = time(9, 15)
 MARKET_CLOSE = time(15, 30)
+INSTRUMENT_MASTER_URL = (
+    "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
+)
 
 
 class ConnectionActionError(RuntimeError):
@@ -56,6 +63,16 @@ class ConnectionSnapshot:
     monitor_status: str = "stopped"
     monitor_last_run_at: datetime | None = None
     monitor_error: str | None = None
+    archive_status: str = "not initialized"
+    archive_error: str | None = None
+    archived_candles: int = 0
+    archived_instruments: int = 0
+    archive_bytes: int = 0
+    archive_oldest_at: str | None = None
+    archive_newest_at: str | None = None
+    archive_gaps: int = 0
+    nearest_expiry: str | None = None
+    atm_strike: float | None = None
 
 
 def _smart_api_factory(api_key: str) -> object:
@@ -69,6 +86,15 @@ def _smart_api_factory(api_key: str) -> object:
     logger.setLevel(logging.CRITICAL)
     logger.disabled = True
     return SmartConnect(api_key)
+
+
+def _instrument_master_loader() -> list[dict[str, object]]:
+    request = Request(INSTRUMENT_MASTER_URL, headers={"User-Agent": "options-bot/0.1"})
+    with urlopen(request, timeout=30) as response:  # noqa: S310
+        payload = json.load(response)
+    if not isinstance(payload, list):
+        raise ValueError("Angel One instrument master is not a list")
+    return payload
 
 
 def _masked(value: str) -> str:
@@ -160,11 +186,18 @@ class ConnectionManager:
         smart_api_factory: Callable[[str], object] = _smart_api_factory,
         totp_factory: Callable[[str], str] | None = None,
         notifier_factory: Callable[[str, str], TelegramNotifier] = TelegramNotifier,
+        instrument_master_loader: Callable[[], list[dict[str, object]]] = (
+            _instrument_master_loader
+        ),
+        market_archive: MarketArchive | None = None,
     ) -> None:
         self._settings = settings
         self._smart_api_factory = smart_api_factory
         self._totp_factory = totp_factory or (lambda secret: pyotp.TOTP(secret).now())
         self._notifier_factory = notifier_factory
+        self._instrument_master_loader = instrument_master_loader
+        self.archive = market_archive or MarketArchive(settings.data_dir / "market-data.sqlite3")
+        self.archive.initialize()
         self._smart_api: object | None = None
         self._lock = threading.RLock()
         self._snapshot = ConnectionSnapshot()
@@ -172,10 +205,65 @@ class ConnectionManager:
         self._last_intelligence_bucket: datetime | None = None
         self._monitor_stop = threading.Event()
         self._monitor_thread: threading.Thread | None = None
+        self._last_instrument_refresh_date = None
+        self._last_backup_date = None
+        self._refresh_archive_snapshot()
 
     def snapshot(self) -> ConnectionSnapshot:
         with self._lock:
             return self._snapshot
+
+    def _refresh_archive_snapshot(self) -> None:
+        stats = self.archive.stats()
+        with self._lock:
+            spot = self._snapshot.nifty_price
+        selection = self.archive.nearest_expiry_summary(
+            datetime.now(self._settings.timezone).date(), spot
+        )
+        with self._lock:
+            self._snapshot = replace(
+                self._snapshot,
+                archive_status="ready",
+                archive_error=None,
+                archived_candles=stats.candle_count,
+                archived_instruments=stats.instrument_count,
+                archive_bytes=stats.database_bytes,
+                archive_oldest_at=stats.oldest_candle_at,
+                archive_newest_at=stats.newest_candle_at,
+                archive_gaps=stats.missing_five_minute_buckets,
+                nearest_expiry=selection["nearest_expiry"],
+                atm_strike=selection["atm_strike"],
+            )
+
+    def refresh_instrument_archive(
+        self, observed_at: datetime | None = None
+    ) -> ConnectionSnapshot:
+        """Archive current NIFTY option metadata without requesting option prices."""
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        try:
+            rows = self._instrument_master_loader()
+            instruments = [
+                item
+                for item in normalize_instruments(rows)
+                if item.underlying == "NIFTY"
+            ]
+            saved = self.archive.save_instruments(instruments, now)
+            self.archive.record_run(now, "success", 0, saved, "NIFTY instruments archived")
+            self._last_instrument_refresh_date = now.date()
+            self._refresh_archive_snapshot()
+        except Exception as exc:
+            detail = _safe_detail(f"{type(exc).__name__}: {exc}", ())
+            self.archive.record_run(now, "failed", 0, 0, detail)
+            with self._lock:
+                self._snapshot = replace(
+                    self._snapshot,
+                    archive_status="instrument refresh failed",
+                    archive_error=detail,
+                )
+            raise ConnectionActionError(f"Instrument archive refresh failed · {detail}") from exc
+        return self.snapshot()
 
     def start_background_monitor(self, interval_seconds: float = 15) -> None:
         """Start one read-only market-data worker for this application process."""
@@ -220,7 +308,21 @@ class ConnectionManager:
         if not connected:
             self.connect_angel()
         self.refresh_nifty()
+        if self._last_instrument_refresh_date != now.date():
+            self._last_instrument_refresh_date = now.date()
+            try:
+                self.refresh_instrument_archive(now)
+            except ConnectionActionError:
+                pass
         self.refresh_intelligence_if_due(now)
+        if now.time() >= self._settings.force_exit and self._last_backup_date != now.date():
+            target = (
+                self._settings.data_dir
+                / "backups"
+                / f"market-data-{now.strftime('%Y%m%d')}.sqlite3"
+            )
+            self.archive.backup(target)
+            self._last_backup_date = now.date()
         with self._lock:
             self._snapshot = replace(
                 self._snapshot,
@@ -396,6 +498,18 @@ class ConnectionManager:
             if not candles:
                 raise ValueError("Angel One returned no closed five-minute candles")
             snapshot = self._intelligence_snapshot(candles, now)
+            saved = self.archive.save_candles(
+                candles,
+                token=NIFTY_TOKEN,
+                exchange=NIFTY_EXCHANGE,
+                timeframe=NIFTY_CANDLE_INTERVAL,
+                collected_at=now,
+            )
+            with self._lock:
+                spot = self._snapshot.nifty_price
+            self.archive.save_observation(now, {**snapshot, "spot": spot})
+            self.archive.record_run(now, "success", saved, 0, "NIFTY candles archived")
+            self._refresh_archive_snapshot()
         except Exception as exc:
             detail = _safe_detail(f"{type(exc).__name__}: {exc}", secrets)
             message = f"NIFTY intelligence refresh failed · {detail}"

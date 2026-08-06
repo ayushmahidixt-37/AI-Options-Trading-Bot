@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -140,6 +140,41 @@ def create_web_app(
                 name="dashboard.html",
                 context=dashboard_context(request, str(exc), False),
             )
+
+    @app.post("/actions/instruments-refresh", response_class=HTMLResponse)
+    def refresh_instruments(
+        request: Request, _user: str = Depends(require_login)
+    ) -> HTMLResponse:
+        try:
+            connections.refresh_instrument_archive()
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, "NIFTY instruments archived", True),
+            )
+        except ConnectionActionError as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, str(exc), False),
+            )
+
+    @app.get("/archive/candles.csv", response_class=FileResponse)
+    def download_archive(_user: str = Depends(require_login)) -> FileResponse:
+        target = settings.data_dir / "exports" / "nifty-five-minute-candles.csv"
+        connections.archive.export_candles_csv(target)
+        return FileResponse(target, filename=target.name, media_type="text/csv")
+
+    @app.post("/actions/archive-backup", response_class=FileResponse)
+    def backup_archive(_user: str = Depends(require_login)) -> FileResponse:
+        stamp = datetime.now(settings.timezone).strftime("%Y%m%d-%H%M%S")
+        target = settings.data_dir / "backups" / f"market-data-{stamp}.sqlite3"
+        connections.archive.backup(target)
+        return FileResponse(
+            target,
+            filename=target.name,
+            media_type="application/vnd.sqlite3",
+        )
 
     @app.post("/actions/telegram-test", response_class=HTMLResponse)
     def test_telegram(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:

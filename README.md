@@ -164,10 +164,15 @@ After **Test Angel connection** succeeds, use **Refresh NIFTY** or **Refresh 5-m
 
 The web process also starts a read-only background monitor. It reconnects to Angel One when needed, refreshes spot data every 15 seconds, and evaluates at most once per five-minute bucket even when Chrome is closed. The dashboard reload only displays the latest in-memory snapshot; it does not drive the monitor. Keep Termux and the `options-bot web` process running, and disable Android battery optimization for Termux if Android suspends it. This monitor has no order-placement call and does not change the `AUTO_START=false` or `LIVE_TRADING_ENABLED=false` safety requirements.
 
+### Local historical archive
+
+The monitor permanently stores validated closed NIFTY candles in `.termux-data/market-data.sqlite3`, separate from the paper ledger. Repeated API responses are duplicate-safe. The daily instrument-master refresh archives current NIFTY option metadata—including token, strike, expiry, type, and lot size—without deleting expired contracts already in the database. The dashboard shows archive coverage, database size, possible intraday gaps, nearest expiry, and ATM strike. It also provides an Excel-compatible candle CSV and a downloadable SQLite backup. SQLite remains the master copy; exports do not modify it. Option-price collection is deliberately deferred to the next bounded-universe phase, and no order is placed by the archive.
+
 ## Functional modules
 
 ```text
 config.py                  validated server and risk settings
+market_archive.py          durable NIFTY candles, option metadata, CSV, and backups
 credentials.py             strict external secret-file parsing
 instruments.py             Angel instrument-master normalization and ATM universe
 market_data.py             Angel One quote/candle data only
