@@ -174,6 +174,12 @@ The confirmed paper-entry panel is deliberately two-step. **Create fresh paper p
 
 Confirmed paper positions are monitored by the same 15-second background worker even when Chrome is closed. The exit-only monitor fetches a fresh option quote and automatically closes the simulated position if its stop is reached, the NIFTY directional signal reverses, or the configured force-exit time arrives. Quote failures leave the position open and are shown in the dashboard rather than guessing a fill. Entries remain manual and separately confirmed; this monitor cannot create a position or place a broker order.
 
+### Reliability and detailed backtests
+
+Set `NSE_HOLIDAYS` in `local-bot.env` to the official comma-separated `YYYY-MM-DD` holiday dates for the current year; those dates are treated as closed sessions rather than failures. The monitor now attempts one fresh Angel login when a quote refresh indicates an expired/broken session, performs a bounded NIFTY candle catch-up after downtime, and displays reconnect, catch-up, and SQLite integrity status. The **Verify database** action runs SQLite's quick integrity check without modifying data.
+
+Archived backtests support optional start/end dates, conservative historical stop handling (opening gaps use the candle open; intrabar stop touches use the stop), configured force exit, lot size, fees, and slippage. Detailed rows show contract, entry, stop, exit, reason, and net P&L, and can be downloaded as CSV. These reports remain simulations and should be considered preliminary until multiple complete sessions with low gap counts have been collected.
+
 ## Functional modules
 
 ```text

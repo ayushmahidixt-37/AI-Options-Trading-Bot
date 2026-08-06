@@ -88,11 +88,15 @@ class ConnectionSnapshot:
     archive_oldest_at: str | None = None
     archive_newest_at: str | None = None
     archive_gaps: int = 0
+    archive_integrity: str = "unknown"
     nearest_expiry: str | None = None
     atm_strike: float | None = None
     option_archive_status: str = "not collected"
     option_contracts_tracked: int = 0
     option_archive_error: str | None = None
+    reconnect_count: int = 0
+    last_login_at: datetime | None = None
+    catchup_status: str = "not run"
 
 
 def _smart_api_factory(api_key: str) -> object:
@@ -232,7 +236,9 @@ class ConnectionManager:
         self._last_instrument_refresh_date = None
         self._last_option_archive_bucket = None
         self._last_backup_date = None
+        self._last_catchup_date = None
         self._paper_cycle: Callable[[datetime], object] | None = None
+        self._reconnect_count = 0
         self._refresh_archive_snapshot()
 
     def snapshot(self) -> ConnectionSnapshot:
@@ -263,9 +269,14 @@ class ConnectionManager:
                 archive_oldest_at=stats.oldest_candle_at,
                 archive_newest_at=stats.newest_candle_at,
                 archive_gaps=stats.missing_five_minute_buckets,
+                archive_integrity=stats.integrity_status,
                 nearest_expiry=selection["nearest_expiry"],
                 atm_strike=selection["atm_strike"],
             )
+
+    def refresh_archive_health(self) -> ConnectionSnapshot:
+        self._refresh_archive_snapshot()
+        return self.snapshot()
 
     def refresh_instrument_archive(
         self, observed_at: datetime | None = None
@@ -461,6 +472,64 @@ class ConnectionManager:
             self._monitor_thread = worker
             worker.start()
 
+    def catch_up_nifty_archive(
+        self, observed_at: datetime | None = None
+    ) -> ConnectionSnapshot:
+        """Fill the NIFTY archive tail after downtime using bounded API windows."""
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        with self._lock:
+            smart_api = self._smart_api
+        if smart_api is None:
+            raise ConnectionActionError("Connect Angel One before archive catch-up")
+        latest = self.archive.latest_candle_at(NIFTY_TOKEN)
+        cursor = (latest + timedelta(minutes=5)) if latest else now - timedelta(days=7)
+        saved = 0
+        try:
+            while cursor < now:
+                window_end = min(cursor + timedelta(days=7), now)
+                response = getattr(smart_api, "getCandleData")(
+                    {
+                        "exchange": NIFTY_EXCHANGE,
+                        "symboltoken": NIFTY_TOKEN,
+                        "interval": NIFTY_CANDLE_INTERVAL,
+                        "fromdate": cursor.strftime("%Y-%m-%d %H:%M"),
+                        "todate": window_end.strftime("%Y-%m-%d %H:%M"),
+                    }
+                )
+                if not isinstance(response, dict) or response.get("status") is False:
+                    raise ValueError(_rejection_detail(response, ()))
+                candles = _closed_five_minute_candles(
+                    response.get("data"),
+                    now=now,
+                    timezone=self._settings.timezone,
+                    limit=2000,
+                )
+                saved += self.archive.save_candles(
+                    candles,
+                    token=NIFTY_TOKEN,
+                    exchange=NIFTY_EXCHANGE,
+                    timeframe=NIFTY_CANDLE_INTERVAL,
+                    collected_at=now,
+                )
+                cursor = window_end + timedelta(minutes=5)
+            self.archive.record_run(now, "success", saved, 0, "NIFTY catch-up complete")
+            self._last_catchup_date = now.date()
+            self._refresh_archive_snapshot()
+            with self._lock:
+                self._snapshot = replace(
+                    self._snapshot, catchup_status=f"complete · {saved} new candles"
+                )
+        except Exception as exc:
+            detail = _safe_detail(str(exc), ())
+            with self._lock:
+                self._snapshot = replace(
+                    self._snapshot, catchup_status=f"failed · {detail}"
+                )
+            raise ConnectionActionError(f"NIFTY catch-up failed · {detail}") from exc
+        return self.snapshot()
+
     def stop_background_monitor(self, timeout_seconds: float = 5) -> None:
         """Stop the worker without leaving a non-daemon shutdown dependency."""
         self._monitor_stop.set()
@@ -481,7 +550,23 @@ class ConnectionManager:
             connected = self._smart_api is not None
         if not connected:
             self.connect_angel()
-        self.refresh_nifty()
+        if self._last_catchup_date != now.date():
+            try:
+                self.catch_up_nifty_archive(now)
+            except ConnectionActionError:
+                self._last_catchup_date = now.date()
+        try:
+            self.refresh_nifty()
+        except ConnectionActionError:
+            with self._lock:
+                self._smart_api = None
+            self._reconnect_count += 1
+            self.connect_angel()
+            self.refresh_nifty()
+            with self._lock:
+                self._snapshot = replace(
+                    self._snapshot, reconnect_count=self._reconnect_count
+                )
         if self._last_instrument_refresh_date != now.date():
             self._last_instrument_refresh_date = now.date()
             try:
@@ -489,7 +574,11 @@ class ConnectionManager:
             except ConnectionActionError:
                 pass
         self.refresh_intelligence_if_due(now)
-        if now.weekday() < 5 and MARKET_OPEN <= now.time() < MARKET_CLOSE:
+        if (
+            now.weekday() < 5
+            and now.date() not in self._settings.nse_holidays
+            and MARKET_OPEN <= now.time() < MARKET_CLOSE
+        ):
             try:
                 self.refresh_option_archive(now)
             except ConnectionActionError as exc:
@@ -587,6 +676,7 @@ class ConnectionManager:
                 angel_status="connected",
                 angel_client=_masked(client_code),
                 angel_error=None,
+                last_login_at=datetime.now(self._settings.timezone),
                 last_message="Angel One connected in market-data-only mode",
             )
             return self._snapshot
@@ -739,8 +829,13 @@ class ConnectionManager:
             14,
         )
         latest = candles[-1].started_at
-        in_session = now.weekday() < 5 and MARKET_OPEN <= now.time() < MARKET_CLOSE
-        market_status = "OPEN" if in_session else "CLOSED"
+        holiday = now.date() in self._settings.nse_holidays
+        in_session = (
+            now.weekday() < 5
+            and not holiday
+            and MARKET_OPEN <= now.time() < MARKET_CLOSE
+        )
+        market_status = "HOLIDAY" if holiday else ("OPEN" if in_session else "CLOSED")
         age = now - latest
         data_status = "fresh" if in_session and age <= timedelta(minutes=10) else "stale"
         if not in_session:
@@ -756,6 +851,10 @@ class ConnectionManager:
             label = "STALE DATA"
             confidence = None
             reason = "Latest closed candle is more than 10 minutes old during the session."
+        elif holiday:
+            label = "MARKET HOLIDAY"
+            confidence = None
+            reason = "Configured NSE trading holiday."
         elif not in_session:
             label = "MARKET CLOSED"
             confidence = None

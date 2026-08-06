@@ -89,3 +89,30 @@ def test_csv_export_and_sqlite_backup_are_readable(tmp_path: Path) -> None:
     assert "instrument_token,symbol" in csv_path.read_text(encoding="utf-8")
     with sqlite3.connect(backup_path) as con:
         assert con.execute("SELECT COUNT(*) FROM market_candles").fetchone()[0] == 1
+
+
+def test_integrity_latest_candle_and_gap_summary(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    started = datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+    store.save_candles(
+        [
+            Candle("Nifty 50", started, 100, 103, 99, 102),
+            Candle("Nifty 50", started + timedelta(minutes=10), 102, 104, 101, 103),
+        ],
+        token="99926000",
+        exchange="NSE",
+        timeframe="FIVE_MINUTE",
+        collected_at=started + timedelta(minutes=10),
+    )
+
+    assert store.integrity_check() == "ok"
+    assert store.latest_candle_at("99926000") == started + timedelta(minutes=10)
+    assert store.gap_summary() == [
+        {
+            "token": "99926000",
+            "symbol": "Nifty 50",
+            "gaps": 1,
+            "first_missing": (started + timedelta(minutes=5)).isoformat(),
+            "last_missing": (started + timedelta(minutes=5)).isoformat(),
+        }
+    ]

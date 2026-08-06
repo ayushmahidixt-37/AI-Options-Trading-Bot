@@ -24,6 +24,7 @@ class ArchiveStats:
     newest_candle_at: str | None
     database_bytes: int
     missing_five_minute_buckets: int
+    integrity_status: str = "unknown"
 
 
 class MarketArchive:
@@ -236,7 +237,54 @@ class MarketArchive:
             newest_candle_at=candle[2],
             database_bytes=self.path.stat().st_size if self.path.exists() else 0,
             missing_five_minute_buckets=missing,
+            integrity_status=self.integrity_check(),
         )
+
+    def integrity_check(self) -> str:
+        """Run SQLite's lightweight integrity check and return a display value."""
+        with self.connect() as con:
+            row = con.execute("PRAGMA quick_check").fetchone()
+        return str(row[0]) if row else "unknown"
+
+    def latest_candle_at(self, token: str, timeframe: str = "FIVE_MINUTE") -> datetime | None:
+        with self.connect() as con:
+            row = con.execute(
+                """SELECT MAX(started_at) FROM market_candles
+                   WHERE instrument_token=? AND timeframe=?""",
+                (token, timeframe),
+            ).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] else None
+
+    def gap_summary(self) -> list[dict[str, object]]:
+        """Describe internal same-session gaps grouped by archived instrument."""
+        with self.connect() as con:
+            rows = con.execute(
+                """SELECT instrument_token, symbol, started_at FROM market_candles
+                   WHERE timeframe='FIVE_MINUTE'
+                   ORDER BY instrument_token, started_at"""
+            ).fetchall()
+        grouped: dict[tuple[str, str], list[datetime]] = {}
+        for row in rows:
+            grouped.setdefault((row[0], row[1]), []).append(datetime.fromisoformat(row[2]))
+        result: list[dict[str, object]] = []
+        for (token, symbol), timestamps in grouped.items():
+            gaps = [
+                (previous + timedelta(minutes=5), current - timedelta(minutes=5))
+                for previous, current in zip(timestamps, timestamps[1:])
+                if previous.date() == current.date()
+                and current - previous > timedelta(minutes=5)
+            ]
+            if gaps:
+                result.append(
+                    {
+                        "token": token,
+                        "symbol": symbol,
+                        "gaps": len(gaps),
+                        "first_missing": gaps[0][0].isoformat(),
+                        "last_missing": gaps[-1][1].isoformat(),
+                    }
+                )
+        return result
 
     def nearest_expiry_summary(self, today: date, spot: float | None) -> dict[str, object]:
         with self.connect() as con:

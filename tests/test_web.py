@@ -69,6 +69,14 @@ def test_web_health_and_scan_actions_are_safe(tmp_path: Path) -> None:
     assert "Healthcheck passed" in health.text
     assert scan.status_code == 200
     assert "no order was placed" in scan.text
+    integrity = client.post("/actions/archive-verify", auth=auth())
+    assert "Archive integrity: ok" in integrity.text
+    invalid_dates = client.post(
+        "/actions/backtest",
+        data={"start_date": "2026-08-10", "end_date": "2026-08-01"},
+        auth=auth(),
+    )
+    assert "Start date must not be after end date" in invalid_dates.text
 
 
 def test_web_connection_actions_show_nifty_and_telegram_status(tmp_path: Path) -> None:

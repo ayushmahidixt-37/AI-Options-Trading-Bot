@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from options_bot.backtest import run_momentum_backtest
+from options_bot.backtest import export_backtest_csv, run_momentum_backtest
 from options_bot.candles import Candle
 from options_bot.config import Settings
 from options_bot.domain import Instrument
@@ -76,13 +76,16 @@ def test_offline_backtest_uses_next_option_open_without_network(tmp_path) -> Non
     )
     result = run_momentum_backtest(archive, settings=settings)
 
-    assert result.status == "READY"
+    assert result.status == "PRELIMINARY"
     assert result.trades == 1
     assert result.winners == 1
     assert result.gross_pnl_points == 5
     assert result.net_pnl == 296.75
     assert result.fees_paid == 40
     assert result.max_drawdown == 0
+    report = export_backtest_csv(result, tmp_path / "trades.csv")
+    assert "exit_reason" in report.read_text(encoding="utf-8")
+    assert "signal-reversal" in report.read_text(encoding="utf-8")
 
 
 def test_backtest_reports_insufficient_archive(tmp_path) -> None:
@@ -90,3 +93,40 @@ def test_backtest_reports_insufficient_archive(tmp_path) -> None:
     archive.initialize()
 
     assert run_momentum_backtest(archive).status == "INSUFFICIENT DATA"
+
+
+def test_backtest_uses_conservative_stop_fill(tmp_path) -> None:
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+    archive.save_instruments(
+        [
+            Instrument(
+                "NIFTY13AUG2624600CE",
+                "CE1",
+                "NFO",
+                "NIFTY",
+                "CE",
+                75,
+                date(2026, 8, 13),
+                24600,
+            )
+        ],
+        start,
+    )
+    archive.save_observation(start, observation("BULLISH"))
+    archive.save_candles(
+        [Candle("NIFTY13AUG2624600CE", start + timedelta(minutes=5), 100, 101, 90, 92)],
+        token="CE1",
+        exchange="NFO",
+        timeframe="FIVE_MINUTE",
+        collected_at=start + timedelta(minutes=10),
+    )
+    settings = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3")}
+    )
+
+    result = run_momentum_backtest(archive, settings=settings)
+
+    assert result.trade_details[0].exit_reason == "stop"
+    assert result.trade_details[0].exit_price < result.trade_details[0].entry_price

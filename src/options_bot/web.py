@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -12,7 +12,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 from .actions import close_paper_position_action, run_health_action, run_paper_scan_action, status_snapshot
-from .backtest import BacktestResult, run_momentum_backtest
+from .backtest import BacktestResult, export_backtest_csv, run_momentum_backtest
 from .connections import ConnectionActionError, ConnectionManager, PaperTradeProposal
 from .domain import PaperOrderRequest
 from .runner import build_application
@@ -188,9 +188,27 @@ def create_web_app(
         )
 
     @app.post("/actions/backtest", response_class=HTMLResponse)
-    def run_backtest(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
+    def run_backtest(
+        request: Request,
+        start_date: str = Form(""),
+        end_date: str = Form(""),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
         nonlocal latest_backtest
-        latest_backtest = run_momentum_backtest(connections.archive, settings=settings)
+        try:
+            start = date.fromisoformat(start_date) if start_date else None
+            end = date.fromisoformat(end_date) if end_date else None
+            if start and end and start > end:
+                raise ValueError("Start date must not be after end date")
+        except ValueError as exc:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, str(exc), False),
+            )
+        latest_backtest = run_momentum_backtest(
+            connections.archive, start=start, end=end, settings=settings
+        )
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -198,6 +216,26 @@ def create_web_app(
                 request,
                 "Backtest completed" if latest_backtest.trades else latest_backtest.reason,
                 latest_backtest.trades > 0,
+            ),
+        )
+
+    @app.get("/backtest/trades.csv", response_class=FileResponse)
+    def download_backtest(_user: str = Depends(require_login)) -> FileResponse:
+        if latest_backtest is None:
+            raise HTTPException(status_code=404, detail="Run a backtest first")
+        target = settings.data_dir / "exports" / "backtest-trades.csv"
+        export_backtest_csv(latest_backtest, target)
+        return FileResponse(target, filename=target.name, media_type="text/csv")
+
+    @app.post("/actions/archive-verify", response_class=HTMLResponse)
+    def verify_archive(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
+        snapshot = connections.refresh_archive_health()
+        ok = snapshot.archive_integrity == "ok"
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(
+                request, f"Archive integrity: {snapshot.archive_integrity}", ok
             ),
         )
 
