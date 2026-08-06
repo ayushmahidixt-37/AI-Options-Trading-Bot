@@ -114,6 +114,14 @@ def test_rejected_login_shows_safe_angel_error_code_and_message(tmp_path: Path) 
     assert "api-key" not in str(error.value)
 
 
+def test_angel_camel_case_error_code_is_preserved() -> None:
+    from options_bot.connections import _rejection_detail
+
+    response = {"success": False, "message": "Invalid API Key", "errorCode": "AG8004"}
+
+    assert _rejection_detail(response, ()) == "AG8004 · Invalid API Key"
+
+
 def test_rejected_nifty_quote_shows_safe_error_code_and_message(tmp_path: Path) -> None:
     credentials = credential_file(tmp_path)
 

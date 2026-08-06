@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import logging
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Callable
@@ -36,7 +37,14 @@ class ConnectionSnapshot:
 
 def _smart_api_factory(api_key: str) -> object:
     from SmartApi import SmartConnect
+    from logzero import logger
 
+    # SmartAPI logs full request headers (including X-PrivateKey) on failures.
+    # Disable its global logger before any network request to keep secrets out of
+    # Termux output and SDK-created log files; this application surfaces only
+    # explicitly redacted diagnostics in the dashboard.
+    logger.setLevel(logging.CRITICAL)
+    logger.disabled = True
     return SmartConnect(api_key)
 
 
@@ -59,7 +67,9 @@ def _safe_detail(value: object, secrets: tuple[str, ...]) -> str:
 def _rejection_detail(response: object, secrets: tuple[str, ...]) -> str:
     if not isinstance(response, dict):
         return "Angel One returned an unexpected login response"
-    error_code = _safe_detail(response.get("errorcode", ""), secrets)
+    error_code = _safe_detail(
+        response.get("errorcode") or response.get("errorCode") or "", secrets
+    )
     message = _safe_detail(response.get("message", ""), secrets)
     parts = [part for part in (error_code, message) if part]
     return " · ".join(parts) or "Angel One rejected the login without an error description"

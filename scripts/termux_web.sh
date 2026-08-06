@@ -69,6 +69,10 @@ mkdir -p "${DATA_DIR}"
 python -m compileall -q src
 python -c "from zoneinfo import ZoneInfo; from SmartApi.smartConnect import SmartConnect; import fastapi, jinja2, uvicorn; import options_bot; ZoneInfo('Asia/Kolkata')"
 
+# Older SmartAPI runs may have written request headers, including the API key,
+# to date-based files. The application now disables those unsafe SDK logs.
+rm -rf "${APP_DIR}/logs"
+
 if grep -qE '^(ANGEL_API_KEY|ANGEL_CLIENT_CODE|ANGEL_PASSWORD|ANGEL_TOTP_SECRET|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID)=[[:space:]]*$' "${CREDENTIALS_FILE}"; then
   echo
   echo "Credentials are not complete yet. Edit this private file, then rerun the script:"

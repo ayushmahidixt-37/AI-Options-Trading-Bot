@@ -146,6 +146,8 @@ NIFTY refresh uses Angel's token-based Market Data API first and automatically f
 
 The Termux installer includes the logging and WebSocket modules imported by Angel One's SDK, even though this milestone uses only REST market data. Rerun the installer after every `git pull` so newly required runtime packages are installed.
 
+SmartAPI's SDK can log complete request headers on API failures. The application disables that SDK logger and the Termux installer removes older `logs/` files that may contain an API key. If a terminal output or screenshot ever reveals `X-PrivateKey`, rotate that Angel API key immediately.
+
 ## Functional modules
 
 ```text
