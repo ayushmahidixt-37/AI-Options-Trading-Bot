@@ -136,3 +136,29 @@ def test_unique_open_symbol_is_database_enforced(tmp_path: Path) -> None:
         values.pop("id")
         values["client_order_id"] = "different"
         application.ledger.insert_open(values)
+
+
+def test_daily_loss_circuit_breaker_resets_by_trading_date(tmp_path: Path) -> None:
+    application = app(tmp_path, MAX_DAILY_NET_LOSS="100")
+    monday = market_time()
+    order_id = application.paper_broker.buy(request(monday), monday)
+    application.paper_broker.close(
+        order_id,
+        Quote("NIFTY_TEST_CE", 97, monday + timedelta(seconds=1)),
+        monday + timedelta(seconds=2),
+        "loss",
+    )
+    with pytest.raises(RiskRejected, match="Daily loss"):
+        application.paper_broker.buy(request(monday, symbol="NIFTY_OTHER_CE"), monday)
+
+    tuesday = monday + timedelta(days=1)
+    application.paper_broker.buy(request(tuesday, symbol="NIFTY_OTHER_CE"), tuesday)
+
+
+def test_buy_records_open_order_and_fee_atomically(tmp_path: Path) -> None:
+    application = app(tmp_path)
+    now = market_time()
+    order_id = application.paper_broker.buy(request(now), now)
+
+    assert application.ledger.open_positions()[0]["id"] == order_id
+    assert application.ledger.account()["fees_paid"] == 20.0

@@ -26,9 +26,17 @@ class _MutableCandle:
     high: float
     low: float
     close: float
+    last_observed_at: datetime
 
     def frozen(self) -> Candle:
-        return Candle(**self.__dict__)
+        return Candle(
+            symbol=self.symbol,
+            started_at=self.started_at,
+            open=self.open,
+            high=self.high,
+            low=self.low,
+            close=self.close,
+        )
 
 
 class CandleStore:
@@ -52,18 +60,21 @@ class CandleStore:
         with self._lock:
             current = self._current.get(symbol)
             if current is None:
-                self._current[symbol] = _MutableCandle(symbol, minute, price, price, price, price)
+                self._current[symbol] = _MutableCandle(symbol, minute, price, price, price, price, observed_at)
                 return None
             if minute < current.started_at:
                 raise ValueError("out-of-order tick")
             if minute == current.started_at:
+                if observed_at < current.last_observed_at:
+                    raise ValueError("out-of-order tick")
                 current.high = max(current.high, price)
                 current.low = min(current.low, price)
                 current.close = price
+                current.last_observed_at = observed_at
                 return None
             closed = current.frozen()
             self._closed[symbol].append(closed)
-            self._current[symbol] = _MutableCandle(symbol, minute, price, price, price, price)
+            self._current[symbol] = _MutableCandle(symbol, minute, price, price, price, price, observed_at)
             return closed
 
     def closed(self, symbol: str, count: int) -> list[Candle]:

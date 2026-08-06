@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 from typing import Mapping
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -51,6 +51,17 @@ def _clock(value: str, name: str) -> time:
         raise ConfigurationError(f"{name} must use HH:MM format") from exc
 
 
+def _dates(value: str, name: str) -> frozenset[date]:
+    try:
+        return frozenset(
+            date.fromisoformat(item.strip())
+            for item in value.split(",")
+            if item.strip()
+        )
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} must contain comma-separated YYYY-MM-DD dates") from exc
+
+
 def load_env_file(path: str | Path, environ: dict[str, str] | None = None) -> Path:
     """Load a non-secret ``KEY=VALUE`` file without overriding the environment."""
     target = os.environ if environ is None else environ
@@ -89,6 +100,7 @@ class Settings:
     entry_start: time
     entry_cutoff: time
     force_exit: time
+    nse_holidays: frozenset[date]
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -119,6 +131,7 @@ class Settings:
             entry_start=_clock(values.get("ENTRY_START_IST", "09:25"), "ENTRY_START_IST"),
             entry_cutoff=_clock(values.get("ENTRY_CUTOFF_IST", "15:00"), "ENTRY_CUTOFF_IST"),
             force_exit=_clock(values.get("FORCE_EXIT_IST", "15:20"), "FORCE_EXIT_IST"),
+            nse_holidays=_dates(values.get("NSE_HOLIDAYS", ""), "NSE_HOLIDAYS"),
         )
         settings.validate()
         return settings

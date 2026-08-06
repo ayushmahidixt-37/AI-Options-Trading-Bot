@@ -30,7 +30,7 @@ class PaperBroker:
         self.risk.validate(request, now)
         fill = self._buy_fill(request.quote.price)
         fee = self.settings.paper_fee_per_order
-        order_id = self.ledger.insert_open(
+        order_id = self.ledger.insert_open_with_fee(
             {
                 "client_order_id": str(uuid.uuid4()),
                 "trading_date": self.clock.trading_date(now),
@@ -51,10 +51,9 @@ class PaperBroker:
                 "status": "OPEN",
                 "strategy": request.strategy,
                 "reason": request.reason,
-            }
+            },
+            fee,
         )
-        with self.ledger.connect() as con:
-            con.execute("UPDATE paper_account SET fees_paid=fees_paid+? WHERE id=1", (fee,))
         return order_id
 
     def close(self, order_id: int, quote: Quote, now: datetime, reason: str) -> float:
