@@ -148,6 +148,16 @@ The Termux installer includes the logging and WebSocket modules imported by Ange
 
 SmartAPI's SDK can log complete request headers on API failures. The application disables that SDK logger and the Termux installer removes older `logs/` files that may contain an API key. If a terminal output or screenshot ever reveals `X-PrivateKey`, rotate that Angel API key immediately.
 
+### Free public Angel redirect URL
+
+This repository includes a credential-free GitHub Pages callback at `docs/angel-callback/index.html`. After enabling GitHub Pages for this repository from the `/docs` folder, register this exact redirect URL with Angel One:
+
+```text
+https://ayushmahidixt-37.github.io/AI-Options-Trading-Bot/angel-callback/
+```
+
+The callback page does not run the bot and is not a substitute for any static outbound IP Angel requires. The bot continues to authenticate with SmartAPI's direct session API from Termux.
+
 ## Functional modules
 
 ```text
