@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from .candles import Candle
+from .config import Settings
 from .market_archive import MarketArchive
 from .strategy import MomentumStrategy
 
@@ -58,11 +59,18 @@ class BacktestResult:
     losers: int
     gross_pnl_points: float
     win_rate: float
+    net_pnl: float
+    fees_paid: float
+    max_drawdown: float
+    profit_factor: float | None
     reason: str
 
 
 def run_momentum_backtest(
-    archive: MarketArchive, start: date | None = None, end: date | None = None
+    archive: MarketArchive,
+    start: date | None = None,
+    end: date | None = None,
+    settings: Settings | None = None,
 ) -> BacktestResult:
     """Replay archived signals and option candles without network or order calls."""
     clauses: list[str] = []
@@ -89,12 +97,12 @@ def run_momentum_backtest(
             for index, row in enumerate(observations)
             if index == 0 or row[2] != observations[index - 1][2]
         ]
-        trades: list[float] = []
+        trades: list[tuple[float, float]] = []
         for index, observation in enumerate(observations):
             observed_at = datetime.fromisoformat(observation[0])
             option_type = "CE" if observation[2] == "BULLISH" else "PE"
             contract = con.execute(
-                """SELECT token FROM instruments
+                """SELECT token, lot_size FROM instruments
                    WHERE underlying='NIFTY' AND option_type=? AND expiry>=date(?)
                    ORDER BY expiry, ABS(strike-?) LIMIT 1""",
                 (option_type, observed_at.isoformat(), observation[1]),
@@ -103,16 +111,21 @@ def run_momentum_backtest(
                 continue
             entry = con.execute(
                 """SELECT started_at, open FROM market_candles
-                   WHERE instrument_token=? AND started_at>?
+                   WHERE instrument_token=? AND started_at>? AND date(started_at)=?
                    ORDER BY started_at LIMIT 1""",
-                (contract[0], observed_at.isoformat()),
+                (contract[0], observed_at.isoformat(), observed_at.date().isoformat()),
             ).fetchone()
             if entry is None:
                 continue
-            next_observed = (
+            force_exit = settings.force_exit if settings else time(15, 20)
+            session_exit = datetime.combine(
+                observed_at.date(), force_exit, tzinfo=observed_at.tzinfo
+            ).isoformat()
+            next_observed = min(
                 observations[index + 1][0]
                 if index + 1 < len(observations)
-                else "9999-12-31T23:59:59+00:00"
+                else session_exit,
+                session_exit,
             )
             exit_row = con.execute(
                 """SELECT close FROM market_candles
@@ -121,7 +134,14 @@ def run_momentum_backtest(
                 (contract[0], entry[0], next_observed),
             ).fetchone()
             if exit_row is not None:
-                trades.append(float(exit_row[0]) - float(entry[1]))
+                raw_points = float(exit_row[0]) - float(entry[1])
+                slippage = settings.paper_slippage_bps / 10_000 if settings else 0.0
+                buy_fill = round(float(entry[1]) * (1 + slippage), 2)
+                sell_fill = round(float(exit_row[0]) * (1 - slippage), 2)
+                units = int(contract[1])
+                fees = 2 * settings.paper_fee_per_order if settings else 0.0
+                net = round((sell_fill - buy_fill) * units - fees, 2)
+                trades.append((raw_points, net))
 
     if not trades:
         return BacktestResult(
@@ -131,16 +151,36 @@ def run_momentum_backtest(
             0,
             0.0,
             0.0,
+            0.0,
+            0.0,
+            0.0,
+            None,
             "Collect signal observations and matching option candles before backtesting.",
         )
-    winners = sum(value > 0 for value in trades)
-    losers = sum(value <= 0 for value in trades)
+    winners = sum(net > 0 for _, net in trades)
+    net_values = [net for _, net in trades]
+    losers = sum(value <= 0 for value in net_values)
+    equity = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+    for value in net_values:
+        equity += value
+        peak = max(peak, equity)
+        max_drawdown = max(max_drawdown, peak - equity)
+    gains = sum(value for value in net_values if value > 0)
+    losses = abs(sum(value for value in net_values if value < 0))
+    profit_factor = gains / losses if losses else None
+    fees_paid = len(trades) * 2 * settings.paper_fee_per_order if settings else 0.0
     return BacktestResult(
         "READY",
         len(trades),
         winners,
         losers,
-        sum(trades),
+        sum(points for points, _ in trades),
         winners / len(trades),
-        "Entry uses the next archived option candle open; exit uses the last candle before the next directional signal.",
+        sum(net_values),
+        fees_paid,
+        max_drawdown,
+        profit_factor,
+        "Entry uses the next archived option candle open; results apply configured lot size, fees, and slippage.",
     )

@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from options_bot.backtest import run_momentum_backtest
 from options_bot.candles import Candle
+from options_bot.config import Settings
 from options_bot.domain import Instrument
 from options_bot.market_archive import MarketArchive
 
@@ -67,12 +68,21 @@ def test_offline_backtest_uses_next_option_open_without_network(tmp_path) -> Non
         collected_at=start + timedelta(minutes=15),
     )
 
-    result = run_momentum_backtest(archive)
+    settings = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+        }
+    )
+    result = run_momentum_backtest(archive, settings=settings)
 
     assert result.status == "READY"
     assert result.trades == 1
     assert result.winners == 1
     assert result.gross_pnl_points == 5
+    assert result.net_pnl == 296.75
+    assert result.fees_paid == 40
+    assert result.max_drawdown == 0
 
 
 def test_backtest_reports_insufficient_archive(tmp_path) -> None:

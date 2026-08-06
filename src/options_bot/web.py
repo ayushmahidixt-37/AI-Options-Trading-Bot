@@ -13,10 +13,12 @@ from fastapi.templating import Jinja2Templates
 
 from .actions import close_paper_position_action, run_health_action, run_paper_scan_action, status_snapshot
 from .backtest import BacktestResult, run_momentum_backtest
-from .connections import ConnectionActionError, ConnectionManager
+from .connections import ConnectionActionError, ConnectionManager, PaperTradeProposal
+from .domain import PaperOrderRequest
 from .runner import build_application
 from .config import Settings
 from .health import healthcheck
+from .risk import RiskRejected
 
 security = HTTPBasic()
 TEMPLATE_DIR = Path(__file__).with_name("templates")
@@ -34,6 +36,7 @@ def create_web_app(
     connections = connection_manager or ConnectionManager(settings)
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     latest_backtest: BacktestResult | None = None
+    latest_proposal: PaperTradeProposal | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -74,6 +77,7 @@ def create_web_app(
             "health": report,
             "connections": connections.snapshot(),
             "backtest": latest_backtest,
+            "proposal": latest_proposal,
             "message": message,
             "ok": ok,
         }
@@ -182,7 +186,7 @@ def create_web_app(
     @app.post("/actions/backtest", response_class=HTMLResponse)
     def run_backtest(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
         nonlocal latest_backtest
-        latest_backtest = run_momentum_backtest(connections.archive)
+        latest_backtest = run_momentum_backtest(connections.archive, settings=settings)
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
@@ -191,6 +195,67 @@ def create_web_app(
                 "Backtest completed" if latest_backtest.trades else latest_backtest.reason,
                 latest_backtest.trades > 0,
             ),
+        )
+
+    @app.post("/actions/paper-proposal", response_class=HTMLResponse)
+    def create_proposal(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
+        nonlocal latest_proposal
+        try:
+            latest_proposal = connections.create_paper_proposal()
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(
+                    request, "Paper proposal created; no order was placed", True
+                ),
+            )
+        except ConnectionActionError as exc:
+            latest_proposal = None
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard.html",
+                context=dashboard_context(request, str(exc), False),
+            )
+
+    @app.post("/actions/paper-confirm", response_class=HTMLResponse)
+    def confirm_proposal(
+        request: Request,
+        proposal_id: str = Form(),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        nonlocal latest_proposal
+        if latest_proposal is None or not secrets.compare_digest(
+            latest_proposal.proposal_id, proposal_id
+        ):
+            result_message, result_ok = "Paper proposal is missing or expired", False
+        else:
+            proposal_to_confirm = latest_proposal
+            latest_proposal = None
+            try:
+                fresh = connections.create_paper_proposal()
+                if (
+                    fresh.instrument.token != proposal_to_confirm.instrument.token
+                    or fresh.direction != proposal_to_confirm.direction
+                ):
+                    raise ConnectionActionError("Signal or ATM contract changed; review a new proposal")
+                order_id = application.paper_broker.buy(
+                    PaperOrderRequest(
+                        instrument=fresh.instrument,
+                        lots=1,
+                        quote=fresh.quote,
+                        stop_price=fresh.stop_price,
+                        strategy="momentum-v1",
+                        reason=f"UI-confirmed {fresh.direction} proposal",
+                    ),
+                    fresh.quote.observed_at,
+                )
+                result_message, result_ok = f"Opened paper position {order_id}", True
+            except (ConnectionActionError, RiskRejected, ValueError) as exc:
+                result_message, result_ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, result_message, result_ok),
         )
 
     @app.post("/actions/telegram-test", response_class=HTMLResponse)

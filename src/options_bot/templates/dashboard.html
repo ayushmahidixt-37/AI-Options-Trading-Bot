@@ -131,7 +131,40 @@
       {% if backtest %}
         <p>Status: <strong>{{ backtest.status }}</strong> · Trades: {{ backtest.trades }} · Winners: {{ backtest.winners }} · Losers: {{ backtest.losers }}</p>
         <p>Win rate: {{ '%.1f%%'|format(backtest.win_rate * 100) }} · Gross option points: {{ '%.2f'|format(backtest.gross_pnl_points) }}</p>
+        <p>Net paper P&amp;L: {{ '%.2f'|format(backtest.net_pnl) }} · Fees: {{ '%.2f'|format(backtest.fees_paid) }} · Maximum drawdown: {{ '%.2f'|format(backtest.max_drawdown) }}</p>
+        <p>Profit factor: {{ '%.2f'|format(backtest.profit_factor) if backtest.profit_factor is not none else 'No losing trades' }}</p>
         <p><small>{{ backtest.reason }}</small></p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Confirmed paper-entry workflow</h2>
+      <p>This never places a real order. Creating a proposal is read-only; opening a simulated position requires a separate confirmation.</p>
+      <form method="post" action="/actions/paper-proposal"><button class="secondary" type="submit">Create fresh paper proposal</button></form>
+      {% if proposal %}
+        <div class="grid">
+          <div>
+            <h3>{{ proposal.direction }} · {{ proposal.instrument.option_type }}</h3>
+            <p>Contract: <strong>{{ proposal.instrument.symbol }}</strong></p>
+            <p>Expiry: {{ proposal.instrument.expiry }} · Strike: {{ '%.2f'|format(proposal.instrument.strike) }}</p>
+            <p>Lot size: {{ proposal.instrument.lot_size }} · Lots: 1</p>
+          </div>
+          <div>
+            <h3>Fresh quote &amp; risk</h3>
+            <p>Quote: {{ '%.2f'|format(proposal.quote.price) }} · Stop: {{ '%.2f'|format(proposal.stop_price) }}</p>
+            <p>Estimated maximum loss: {{ '%.2f'|format(proposal.estimated_max_loss) }}</p>
+            <p>Confidence: {{ '%.0f%%'|format(proposal.confidence * 100) }}</p>
+            <p>{{ proposal.reason }}</p>
+          </div>
+          <div>
+            <h3>Explicit confirmation</h3>
+            <p>A new quote and all risk limits are checked again when you confirm.</p>
+            <form method="post" action="/actions/paper-confirm">
+              <input type="hidden" name="proposal_id" value="{{ proposal.proposal_id }}">
+              <button type="submit">Confirm one-lot paper entry</button>
+            </form>
+          </div>
+        </div>
       {% endif %}
     </section>
 

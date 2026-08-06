@@ -383,6 +383,56 @@ def test_collects_bounded_nearest_expiry_option_candles(tmp_path: Path) -> None:
     assert snapshot.archived_option_candles == 4
 
 
+def test_creates_read_only_atm_paper_proposal_with_bounded_risk(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+    now = datetime(2026, 8, 6, 13, 53, tzinfo=IST)
+
+    class FakeApi:
+        def generateSession(self, *_args):
+            return {"status": True, "data": {"jwtToken": "secret"}}
+
+        def getMarketData(self, *_args):
+            return {"status": True, "data": {"fetched": [{"ltp": 100.0}]}}
+
+    manager = ConnectionManager(
+        settings(tmp_path, credentials),
+        smart_api_factory=lambda _key: FakeApi(),
+        totp_factory=lambda _secret: "123456",
+        instrument_master_loader=lambda: [],
+    )
+    manager.connect_angel()
+    manager.archive.save_instruments(
+        [
+            Instrument(
+                "NIFTY13AUG2624600CE",
+                "CE",
+                "NFO",
+                "NIFTY",
+                "CE",
+                75,
+                date(2026, 8, 13),
+                24600,
+            )
+        ],
+        now,
+    )
+    manager._snapshot = replace(
+        manager.snapshot(),
+        nifty_price=24620,
+        signal_label="BULLISH",
+        signal_confidence=0.57,
+        signal_reason="fixture",
+        data_status="fresh",
+    )
+
+    proposal = manager.create_paper_proposal(now)
+
+    assert proposal.instrument.option_type == "CE"
+    assert proposal.quote.price == 100
+    assert 0 < proposal.stop_price < proposal.quote.price
+    assert proposal.estimated_max_loss < manager._settings.max_loss_per_trade
+
+
 def test_candle_parser_rejects_duplicates_and_excludes_forming_candle() -> None:
     now = datetime(2026, 8, 6, 13, 53, tzinfo=IST)
     rows = candle_rows(now, 3)

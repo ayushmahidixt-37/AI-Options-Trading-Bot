@@ -6,6 +6,7 @@ import threading
 import logging
 import json
 import time as clock
+import uuid
 from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta, tzinfo
 from typing import Callable
@@ -16,6 +17,7 @@ import pyotp
 from .candles import Candle
 from .config import Settings
 from .credentials import load_credentials
+from .domain import Instrument, Quote
 from .indicators import atr, ema, rsi
 from .instruments import normalize_instruments
 from .market_archive import MarketArchive
@@ -36,6 +38,18 @@ INSTRUMENT_MASTER_URL = (
 
 class ConnectionActionError(RuntimeError):
     """Raised with a display-safe message when an external action fails."""
+
+
+@dataclass(frozen=True)
+class PaperTradeProposal:
+    proposal_id: str
+    instrument: Instrument
+    quote: Quote
+    stop_price: float
+    direction: str
+    confidence: float
+    reason: str
+    estimated_max_loss: float
 
 
 @dataclass(frozen=True)
@@ -346,6 +360,65 @@ class ConnectionManager:
             )
         self._refresh_archive_snapshot()
         return self.snapshot()
+
+    def create_paper_proposal(
+        self, observed_at: datetime | None = None
+    ) -> PaperTradeProposal:
+        """Build a fresh, non-executing one-lot proposal from the current signal."""
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        with self._lock:
+            smart_api = self._smart_api
+            spot = self._snapshot.nifty_price
+            signal = self._snapshot.signal_label
+            confidence = self._snapshot.signal_confidence
+            reason = self._snapshot.signal_reason
+            data_status = self._snapshot.data_status
+        if smart_api is None or not spot:
+            raise ConnectionActionError("Connect Angel One and load NIFTY spot first")
+        if data_status != "fresh" or signal not in {"BULLISH", "BEARISH"}:
+            raise ConnectionActionError("A fresh BULLISH or BEARISH signal is required")
+        required_type = "CE" if signal == "BULLISH" else "PE"
+        contracts = self.archive.select_near_atm_options(now.date(), spot, 0)
+        instrument = next(
+            (item for item in contracts if item.option_type == required_type), None
+        )
+        if instrument is None:
+            raise ConnectionActionError("No matching ATM option is archived")
+        try:
+            try:
+                response = getattr(smart_api, "getMarketData")(
+                    "LTP", {instrument.exchange: [instrument.token]}
+                )
+            except (AttributeError, TypeError, RuntimeError):
+                response = getattr(smart_api, "ltpData")(
+                    instrument.exchange, instrument.symbol, instrument.token
+                )
+            price = _quote_price(response)
+        except Exception as exc:
+            raise ConnectionActionError(
+                f"Option quote failed · {_safe_detail(str(exc), ())}"
+            ) from exc
+        quote = Quote(instrument.symbol, price, now)
+        expected_fill = price * (1 + self._settings.paper_slippage_bps / 10_000)
+        risk_budget = self._settings.max_loss_per_trade * 0.8
+        fees = 2 * self._settings.paper_fee_per_order
+        stop_distance = max(0.01, (risk_budget - fees) / instrument.lot_size)
+        stop = round(expected_fill - stop_distance, 2)
+        if stop <= 0 or stop >= price:
+            raise ConnectionActionError("Configured risk budget cannot produce a valid stop")
+        estimated_loss = round((expected_fill - stop) * instrument.lot_size + fees, 2)
+        return PaperTradeProposal(
+            proposal_id=str(uuid.uuid4()),
+            instrument=instrument,
+            quote=quote,
+            stop_price=stop,
+            direction=signal,
+            confidence=confidence or 0.0,
+            reason=reason,
+            estimated_max_loss=estimated_loss,
+        )
 
     def start_background_monitor(self, interval_seconds: float = 15) -> None:
         """Start one read-only market-data worker for this application process."""

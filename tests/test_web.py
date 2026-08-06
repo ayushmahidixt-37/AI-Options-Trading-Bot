@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from fastapi.testclient import TestClient
 
 from options_bot.config import Settings
-from options_bot.connections import ConnectionManager
+from options_bot.connections import ConnectionManager, PaperTradeProposal
 from options_bot.domain import Instrument, PaperOrderRequest, Quote
 from options_bot.runner import build_application
 from options_bot.web import create_web_app
@@ -182,3 +182,51 @@ def test_web_can_close_existing_paper_position(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert "Closed paper position" in response.text
     assert "No open paper positions" in response.text
+
+
+def test_web_requires_separate_confirmation_for_paper_proposal(tmp_path: Path) -> None:
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "ENTRY_START_IST": "00:00",
+            "ENTRY_CUTOFF_IST": "23:58",
+            "FORCE_EXIT_IST": "23:59",
+        }
+    )
+    manager = ConnectionManager(cfg)
+    now = datetime.now(IST)
+    instrument = Instrument(
+        "NIFTY_TEST_CE",
+        "123",
+        "NFO",
+        "NIFTY",
+        "CE",
+        75,
+        now.date() + timedelta(days=7),
+        24600,
+    )
+    proposal = PaperTradeProposal(
+        "proposal-1",
+        instrument,
+        Quote(instrument.symbol, 100, now),
+        96,
+        "BULLISH",
+        0.57,
+        "fixture",
+        358.75,
+    )
+    manager.create_paper_proposal = lambda: proposal  # type: ignore[method-assign]
+    client = TestClient(create_web_app(cfg, "secret", manager))
+
+    displayed = client.post("/actions/paper-proposal", auth=auth())
+    assert "no order was placed" in displayed.text
+    assert "Confirm one-lot paper entry" in displayed.text
+
+    confirmed = client.post(
+        "/actions/paper-confirm",
+        data={"proposal_id": proposal.proposal_id},
+        auth=auth(),
+    )
+    assert "Opened paper position" in confirmed.text
+    assert "NIFTY_TEST_CE" in confirmed.text
