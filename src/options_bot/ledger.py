@@ -119,6 +119,35 @@ class PaperLedger:
             ).fetchone()
         return float(row[0])
 
+    def daily_summary(self, trading_date: str) -> dict[str, object]:
+        with self.connect() as con:
+            row = con.execute(
+                """SELECT COUNT(*) AS trades,
+                          SUM(CASE WHEN status='CLOSED' AND realized_pnl>0 THEN 1 ELSE 0 END) AS wins,
+                          SUM(CASE WHEN status='CLOSED' AND realized_pnl<=0 THEN 1 ELSE 0 END) AS losses,
+                          COALESCE(SUM(CASE WHEN status='CLOSED' THEN realized_pnl ELSE 0 END), 0) AS net_pnl,
+                          COALESCE(SUM(entry_fee + exit_fee), 0) AS fees,
+                          SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) AS open_positions
+                   FROM paper_orders WHERE trading_date=?""",
+                (trading_date,),
+            ).fetchone()
+        return {key: row[key] or 0 for key in row.keys()}
+
+    def record_event(self, occurred_at: str, level: str, event_type: str, details: str) -> None:
+        with self.connect() as con:
+            con.execute(
+                "INSERT INTO bot_events(occurred_at, level, event_type, details) VALUES (?, ?, ?, ?)",
+                (occurred_at, level, event_type, details),
+            )
+
+    def recent_events(self, limit: int = 20) -> list[sqlite3.Row]:
+        with self.connect() as con:
+            return list(
+                con.execute(
+                    "SELECT * FROM bot_events ORDER BY id DESC LIMIT ?", (max(1, limit),)
+                )
+            )
+
     def insert_open(self, values: dict[str, object]) -> int:
         columns = ",".join(values)
         placeholders = ",".join("?" for _ in values)

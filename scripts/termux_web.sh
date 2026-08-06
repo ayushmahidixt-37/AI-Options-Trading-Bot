@@ -8,18 +8,7 @@ WEB_PORT=${WEB_PORT:-8000}
 CONFIG_FILE=${CONFIG_FILE:-$APP_DIR/local-bot.env}
 DATA_DIR=${DATA_DIR:-$APP_DIR/.termux-data}
 CREDENTIALS_FILE=${CREDENTIALS_FILE:-$APP_DIR/credentials.env}
-
-if [[ -z ${OPTIONS_BOT_WEB_PASSWORD:-} ]]; then
-  echo "Enter a local web UI password for username admin. It will not be shown:"
-  read -r -s OPTIONS_BOT_WEB_PASSWORD
-  echo
-  export OPTIONS_BOT_WEB_PASSWORD
-fi
-
-if [[ -z ${OPTIONS_BOT_WEB_PASSWORD} ]]; then
-  echo "OPTIONS_BOT_WEB_PASSWORD cannot be empty." >&2
-  exit 2
-fi
+PASSWORD_FILE=${PASSWORD_FILE:-$DATA_DIR/web-password}
 
 if command -v pkg >/dev/null 2>&1; then
   pkg update -y
@@ -32,6 +21,24 @@ fi
 
 cd "${APP_DIR}"
 git pull --ff-only || true
+
+mkdir -p "${DATA_DIR}"
+if [[ -z ${OPTIONS_BOT_WEB_PASSWORD:-} ]]; then
+  if [[ -s ${PASSWORD_FILE} ]]; then
+    OPTIONS_BOT_WEB_PASSWORD=$(cat "${PASSWORD_FILE}")
+  else
+    OPTIONS_BOT_WEB_PASSWORD=12345
+    printf '%s\n' "${OPTIONS_BOT_WEB_PASSWORD}" > "${PASSWORD_FILE}"
+  fi
+  export OPTIONS_BOT_WEB_PASSWORD
+fi
+
+if [[ -z ${OPTIONS_BOT_WEB_PASSWORD} ]]; then
+  echo "OPTIONS_BOT_WEB_PASSWORD cannot be empty." >&2
+  exit 2
+fi
+printf '%s\n' "${OPTIONS_BOT_WEB_PASSWORD}" > "${PASSWORD_FILE}"
+chmod 600 "${PASSWORD_FILE}"
 
 python -m pip install --upgrade pip setuptools wheel
 
@@ -84,6 +91,6 @@ echo
 echo "Starting AI Options Trading Bot web UI..."
 echo "Open this in tablet Chrome: http://${WEB_HOST}:${WEB_PORT}"
 echo "Username: admin"
-echo "Password: the password you entered"
+echo "Password: saved in ${PASSWORD_FILE} (initial default: 12345)"
 echo
 exec options-bot --config "${CONFIG_FILE}" web --host "${WEB_HOST}" --port "${WEB_PORT}"

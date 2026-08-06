@@ -936,3 +936,14 @@ class ConnectionManager:
                 last_message="Telegram test alert sent",
             )
             return self._snapshot
+
+    def send_alert(self, text: str) -> None:
+        """Send an operator alert without accepting Telegram commands."""
+        try:
+            credentials = load_credentials(self._settings.credentials_path)
+        except FileNotFoundError:
+            return
+        token = credentials.get("TELEGRAM_BOT_TOKEN", "").strip()
+        chat_id = credentials.get("TELEGRAM_CHAT_ID", "").strip()
+        if token and chat_id:
+            self._notifier_factory(token, chat_id).send(text)

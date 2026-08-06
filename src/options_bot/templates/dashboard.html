@@ -158,6 +158,7 @@
       <p>This never places a real order. Creating a proposal is read-only; opening a simulated position requires a separate confirmation.</p>
       <p>Paper exit monitor: <span class="{{ 'safe' if paper_monitor.status == 'running' else 'blocked' }}">{{ paper_monitor.status }}</span>
         · Checked: {{ paper_monitor.positions_checked }} · Closed on last cycle: {{ paper_monitor.positions_closed }}</p>
+      <p>Recovered after startup: {{ paper_monitor.recovered_positions }} · Estimated open P&amp;L after paper costs: <strong>{{ '%.2f'|format(paper_monitor.total_unrealized_pnl) }}</strong></p>
       <p>Last exit action: {{ paper_monitor.last_action }}</p>
       {% if paper_monitor.error %}<p class="blocked">{{ paper_monitor.error }}</p>{% endif %}
       <form method="post" action="/actions/paper-proposal"><button class="secondary" type="submit">Create fresh paper proposal</button></form>
@@ -186,6 +187,37 @@
           </div>
         </div>
       {% endif %}
+      {% if paper_monitor.position_quotes %}
+        <h3>Fresh paper-position quotes</h3>
+        <div style="overflow-x:auto"><table><thead><tr><th>Symbol</th><th>LTP</th><th>Stop</th><th>Estimated P&amp;L</th><th>Quoted</th></tr></thead><tbody>
+        {% for quote in paper_monitor.position_quotes %}<tr><td>{{ quote.symbol }}</td><td>{{ '%.2f'|format(quote.ltp) }}</td><td>{{ '%.2f'|format(quote.stop_price) }}</td><td>{{ '%.2f'|format(quote.unrealized_pnl) }}</td><td>{{ quote.quoted_at.strftime('%H:%M:%S %Z') }}</td></tr>{% endfor %}
+        </tbody></table></div>
+      {% endif %}
+      {% if positions %}
+        <hr>
+        <h3 class="blocked">Emergency paper kill switch</h3>
+        <p>This closes every simulated position using a fresh market quote. It cannot place or close a real order.</p>
+        <form method="post" action="/actions/paper-close-all">
+          <input required name="confirmation" type="text" placeholder="CLOSE ALL PAPER" style="max-width:14rem">
+          <button class="danger" type="submit">Close all paper positions</button>
+        </form>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <h2>Today's paper report &amp; audit trail</h2>
+      <div class="grid">
+        <div><h3>Daily summary</h3>
+          <p>Trades: {{ daily_summary.trades }} · Wins: {{ daily_summary.wins }} · Losses: {{ daily_summary.losses }}</p>
+          <p>Net realized P&amp;L: <strong>{{ '%.2f'|format(daily_summary.net_pnl) }}</strong></p>
+          <p>Fees: {{ '%.2f'|format(daily_summary.fees) }} · Open positions: {{ daily_summary.open_positions }}</p>
+        </div>
+        <div><h3>Recent safety events</h3>
+          {% if recent_events %}<div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Level</th><th>Event</th><th>Details</th></tr></thead><tbody>
+          {% for event in recent_events %}<tr><td>{{ event.occurred_at }}</td><td>{{ event.level }}</td><td>{{ event.event_type }}</td><td>{{ event.details }}</td></tr>{% endfor %}
+          </tbody></table></div>{% else %}<p>No paper lifecycle events recorded yet.</p>{% endif %}
+        </div>
+      </div>
     </section>
 
     <section class="card">

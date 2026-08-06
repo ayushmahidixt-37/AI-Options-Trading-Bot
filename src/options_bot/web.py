@@ -72,6 +72,7 @@ def create_web_app(
     def dashboard_context(request: Request, message: str | None = None, ok: bool | None = None) -> dict[str, object]:
         snapshot = status_snapshot(application)
         report = healthcheck(settings, application.ledger)
+        now = datetime.now(settings.timezone)
         return {
             "request": request,
             "settings": settings,
@@ -82,6 +83,10 @@ def create_web_app(
             "backtest": latest_backtest,
             "proposal": latest_proposal,
             "paper_monitor": paper_monitor.snapshot(),
+            "daily_summary": application.ledger.daily_summary(
+                application.clock.trading_date(now)
+            ),
+            "recent_events": application.ledger.recent_events(),
             "message": message,
             "ok": ok,
         }
@@ -292,12 +297,42 @@ def create_web_app(
                     fresh.quote.observed_at,
                 )
                 result_message, result_ok = f"Opened paper position {order_id}", True
+                application.ledger.record_event(
+                    fresh.quote.observed_at.isoformat(),
+                    "INFO",
+                    "paper_entry",
+                    f"{fresh.instrument.symbol} one lot",
+                )
+                try:
+                    connections.send_alert(
+                        f"Paper entry confirmed: {fresh.instrument.symbol}, quote {fresh.quote.price:.2f}, stop {fresh.stop_price:.2f}"
+                    )
+                except Exception:
+                    pass
             except (ConnectionActionError, RiskRejected, ValueError) as exc:
                 result_message, result_ok = str(exc), False
         return templates.TemplateResponse(
             request=request,
             name="dashboard.html",
             context=dashboard_context(request, result_message, result_ok),
+        )
+
+    @app.post("/actions/paper-close-all", response_class=HTMLResponse)
+    def close_all_paper(
+        request: Request,
+        confirmation: str = Form(),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        try:
+            result = paper_monitor.close_all(confirmation)
+            message = f"Paper kill switch complete; closed {result.positions_closed} position(s)"
+            ok = True
+        except (ConnectionActionError, RuntimeError, ValueError) as exc:
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
         )
 
     @app.post("/actions/telegram-test", response_class=HTMLResponse)

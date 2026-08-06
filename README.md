@@ -123,7 +123,9 @@ cd AI-Options-Trading-Bot
 scripts/termux_web.sh
 ```
 
-The script installs only the runtime packages needed by the dashboard (including the timezone database required by Android), creates a tablet-local config under `.termux-data`, checks that the application imports, and starts the password-protected UI on `http://127.0.0.1:8000`. It intentionally does not install developer tools such as Ruff because compiling them can exceed a tablet's available memory. Open that URL in Chrome on the same tablet and sign in as `admin`.
+The script installs only the runtime packages needed by the dashboard (including the timezone database required by Android), creates a tablet-local config under `.termux-data`, checks that the application imports, and starts the password-protected UI on `http://127.0.0.1:8000`. It intentionally does not install developer tools such as Ruff because compiling them can exceed a tablet's available memory. Open that URL in Chrome on the same tablet and sign in as `admin` with the initial password `12345`.
+
+The Termux launcher saves that password in `.termux-data/web-password` with owner-only permissions and reuses it on every start, so no repeated editing is needed. This simple default is suitable only while the dashboard remains bound to `127.0.0.1`; set `OPTIONS_BOT_WEB_PASSWORD` to a stronger value before exposing the UI through a tunnel or network interface. The supplied value is then saved for future starts.
 
 Keep the Termux session running while using the dashboard. If an earlier setup stopped before converting the Linux `/var/lib/ai-options-bot` paths, rerun `scripts/termux_web.sh`; it repairs those defaults automatically before starting the server.
 
