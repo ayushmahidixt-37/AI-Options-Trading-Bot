@@ -127,6 +127,15 @@ The script installs only the runtime packages needed by the dashboard (including
 
 Keep the Termux session running while using the dashboard. If an earlier setup stopped before converting the Linux `/var/lib/ai-options-bot` paths, rerun `scripts/termux_web.sh`; it repairs those defaults automatically before starting the server.
 
+Before the first connected-data run, put the rotated Angel One and Telegram values in the private Termux file:
+
+```bash
+cd ~/AI-Options-Trading-Bot
+nano credentials.env
+```
+
+Fill `ANGEL_API_KEY`, `ANGEL_CLIENT_CODE`, `ANGEL_PASSWORD`, `ANGEL_TOTP_SECRET`, `TELEGRAM_BOT_TOKEN`, and `TELEGRAM_CHAT_ID`. Do not paste credentials into GitHub, Colab, or chat. In Nano, save with **Ctrl+O**, press **Enter**, and exit with **Ctrl+X**. The Termux script creates this ignored file when needed, restricts it to the current user, and stops with editing instructions if a required value is empty.
+
 ## Functional modules
 
 ```text
