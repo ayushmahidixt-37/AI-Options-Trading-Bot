@@ -142,6 +142,8 @@ If Angel One rejects the connection, the panel shows Angel's error code and a cr
 
 The NIFTY panel similarly displays Angel's credential-redacted quote error when login succeeds but quote retrieval fails. Share only that **Reason** text to diagnose symbol, token, permission, or API errors.
 
+NIFTY refresh uses Angel's token-based Market Data API first and automatically falls back to the legacy LTP endpoint for SDK compatibility.
+
 The Termux installer includes the logging and WebSocket modules imported by Angel One's SDK, even though this milestone uses only REST market data. Rerun the installer after every `git pull` so newly required runtime packages are installed.
 
 ## Functional modules

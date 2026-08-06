@@ -50,9 +50,9 @@ def test_connects_and_refreshes_nifty_without_order_methods(tmp_path: Path) -> N
             assert (client_code, password, totp) == ("CLIENT1234", "pin", "123456")
             return {"status": True, "data": {"jwtToken": "never-exposed"}}
 
-        def ltpData(self, exchange: str, symbol: str, token: str) -> dict[str, object]:
-            assert (exchange, symbol, token) == ("NSE", "Nifty 50", "99926000")
-            return {"status": True, "data": {"ltp": 24567.8}}
+        def getMarketData(self, mode: str, tokens: dict[str, list[str]]) -> dict[str, object]:
+            assert (mode, tokens) == ("LTP", {"NSE": ["99926000"]})
+            return {"status": True, "data": {"fetched": [{"ltp": 24567.8}]}}
 
     manager = ConnectionManager(
         settings(tmp_path, credentials),
@@ -121,6 +121,14 @@ def test_rejected_nifty_quote_shows_safe_error_code_and_message(tmp_path: Path) 
         def generateSession(self, *_args):
             return {"status": True, "data": {"jwtToken": "secret"}}
 
+        def getMarketData(self, *_args):
+            return {
+                "status": False,
+                "errorcode": "AB5678",
+                "message": "Invalid symbol for api-key",
+                "data": None,
+            }
+
         def ltpData(self, *_args):
             return {
                 "status": False,
@@ -142,6 +150,30 @@ def test_rejected_nifty_quote_shows_safe_error_code_and_message(tmp_path: Path) 
     snapshot = manager.snapshot()
     assert snapshot.quote_error == "AB5678 · Invalid symbol for [redacted]"
     assert "api-key" not in str(error.value)
+
+
+def test_nifty_quote_falls_back_to_legacy_ltp_method(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+
+    class LegacyApi:
+        def generateSession(self, *_args):
+            return {"status": True, "data": {"jwtToken": "secret"}}
+
+        def getMarketData(self, *_args):
+            raise RuntimeError("new quote API unavailable")
+
+        def ltpData(self, exchange, symbol, token):
+            assert (exchange, symbol, token) == ("NSE", "Nifty 50", "99926000")
+            return {"status": True, "data": {"ltp": 24570}}
+
+    manager = ConnectionManager(
+        settings(tmp_path, credentials),
+        smart_api_factory=lambda _api_key: LegacyApi(),
+        totp_factory=lambda _secret: "123456",
+    )
+    manager.connect_angel()
+
+    assert manager.refresh_nifty().nifty_price == 24570
 
 
 def test_sends_alert_only_telegram_message(tmp_path: Path) -> None:

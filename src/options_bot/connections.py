@@ -65,6 +65,21 @@ def _rejection_detail(response: object, secrets: tuple[str, ...]) -> str:
     return " · ".join(parts) or "Angel One rejected the login without an error description"
 
 
+def _quote_price(response: object) -> float:
+    if not isinstance(response, dict):
+        raise TypeError("quote response is not an object")
+    data = response.get("data")
+    if isinstance(data, dict) and "ltp" in data:
+        price = float(data["ltp"])
+    elif isinstance(data, dict) and isinstance(data.get("fetched"), list) and data["fetched"]:
+        price = float(data["fetched"][0]["ltp"])
+    else:
+        raise KeyError("quote response has no LTP")
+    if price <= 0:
+        raise ValueError("quote is not positive")
+    return price
+
+
 class ConnectionManager:
     """Own authenticated data-only sessions without exposing credential values."""
 
@@ -145,25 +160,36 @@ class ConnectionManager:
             raise ConnectionActionError("Connect Angel One before refreshing NIFTY")
         credentials = load_credentials(self._settings.credentials_path)
         secret_values = tuple(value.strip() for value in credentials.values() if value.strip())
+        response: object = {}
         try:
-            response = getattr(smart_api, "ltpData")(NIFTY_EXCHANGE, NIFTY_SYMBOL, NIFTY_TOKEN)
-        except Exception as exc:
-            detail = _safe_detail(f"{type(exc).__name__}: {exc}", secret_values)
-            message = f"NIFTY quote request failed · {detail}"
-            with self._lock:
-                self._snapshot = replace(
-                    self._snapshot,
-                    angel_status="quote failed",
-                    quote_error=detail,
-                    last_message=message,
+            response = getattr(smart_api, "getMarketData")("LTP", {NIFTY_EXCHANGE: [NIFTY_TOKEN]})
+            price = _quote_price(response)
+        except Exception as market_data_exc:
+            try:
+                response = getattr(smart_api, "ltpData")(NIFTY_EXCHANGE, NIFTY_SYMBOL, NIFTY_TOKEN)
+                price = _quote_price(response)
+            except Exception as legacy_exc:
+                response_detail = _rejection_detail(response, secret_values)
+                exception_detail = _safe_detail(
+                    f"{type(legacy_exc).__name__}: {legacy_exc}", secret_values
                 )
-            raise ConnectionActionError(message) from exc
-        data = response.get("data") if isinstance(response, dict) else None
-        try:
-            price = float(data["ltp"])
-            if price <= 0:
-                raise ValueError("non-positive quote")
-        except (KeyError, TypeError, ValueError) as exc:
+                detail = response_detail
+                if "without an error description" in response_detail:
+                    detail = exception_detail
+                if not detail:
+                    detail = _safe_detail(
+                        f"{type(market_data_exc).__name__}: {market_data_exc}", secret_values
+                    )
+                message = f"NIFTY quote refresh failed · {detail}"
+                with self._lock:
+                    self._snapshot = replace(
+                        self._snapshot,
+                        angel_status="quote failed",
+                        quote_error=detail,
+                        last_message=message,
+                    )
+                raise ConnectionActionError(message) from legacy_exc
+        if not isinstance(response, dict) or response.get("status") is False:
             detail = _rejection_detail(response, secret_values)
             message = f"NIFTY quote refresh failed · {detail}"
             with self._lock:
@@ -173,7 +199,7 @@ class ConnectionManager:
                     quote_error=detail,
                     last_message=message,
                 )
-            raise ConnectionActionError(message) from exc
+            raise ConnectionActionError(message)
         now = datetime.now(self._settings.timezone)
         with self._lock:
             self._snapshot = replace(
