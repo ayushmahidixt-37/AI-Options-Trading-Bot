@@ -42,7 +42,11 @@ python -m pip install --no-deps -e .
 mkdir -p "${DATA_DIR}"
 if [[ ! -f ${CONFIG_FILE} ]]; then
   cp bot.env.example "${CONFIG_FILE}"
-  CONFIG_FILE="${CONFIG_FILE}" DATA_DIR="${DATA_DIR}" python - <<'PY'
+fi
+
+# Repair configs left behind by an interrupted older installer as well as new
+# configs. Replacing only the documented Linux defaults preserves user edits.
+CONFIG_FILE="${CONFIG_FILE}" DATA_DIR="${DATA_DIR}" python - <<'PY'
 import os
 from pathlib import Path
 path = Path(os.environ["CONFIG_FILE"])
@@ -52,7 +56,7 @@ text = text.replace("/var/lib/ai-options-bot", str(data_dir))
 text = text.replace("/etc/ai-options-bot/credentials.env", str(Path.cwd() / "credentials.env.example"))
 path.write_text(text, encoding="utf-8")
 PY
-fi
+mkdir -p "${DATA_DIR}"
 
 python -m compileall -q src
 python -c "from zoneinfo import ZoneInfo; import fastapi, jinja2, uvicorn; import options_bot; ZoneInfo('Asia/Kolkata')"

@@ -125,6 +125,8 @@ scripts/termux_web.sh
 
 The script installs only the runtime packages needed by the dashboard (including the timezone database required by Android), creates a tablet-local config under `.termux-data`, checks that the application imports, and starts the password-protected UI on `http://127.0.0.1:8000`. It intentionally does not install developer tools such as Ruff because compiling them can exceed a tablet's available memory. Open that URL in Chrome on the same tablet and sign in as `admin`.
 
+Keep the Termux session running while using the dashboard. If an earlier setup stopped before converting the Linux `/var/lib/ai-options-bot` paths, rerun `scripts/termux_web.sh`; it repairs those defaults automatically before starting the server.
+
 ## Functional modules
 
 ```text
