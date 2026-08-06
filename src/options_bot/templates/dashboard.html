@@ -140,6 +140,10 @@
     <section class="card">
       <h2>Confirmed paper-entry workflow</h2>
       <p>This never places a real order. Creating a proposal is read-only; opening a simulated position requires a separate confirmation.</p>
+      <p>Paper exit monitor: <span class="{{ 'safe' if paper_monitor.status == 'running' else 'blocked' }}">{{ paper_monitor.status }}</span>
+        · Checked: {{ paper_monitor.positions_checked }} · Closed on last cycle: {{ paper_monitor.positions_closed }}</p>
+      <p>Last exit action: {{ paper_monitor.last_action }}</p>
+      {% if paper_monitor.error %}<p class="blocked">{{ paper_monitor.error }}</p>{% endif %}
       <form method="post" action="/actions/paper-proposal"><button class="secondary" type="submit">Create fresh paper proposal</button></form>
       {% if proposal %}
         <div class="grid">

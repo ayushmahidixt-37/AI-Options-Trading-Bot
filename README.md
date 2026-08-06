@@ -172,6 +172,8 @@ During the open session, the next archive phase collects closed five-minute cand
 
 The confirmed paper-entry panel is deliberately two-step. **Create fresh paper proposal** reads the current signal, selects the matching nearest-expiry ATM CE or PE, fetches a current option quote, and calculates a one-lot stop below the configured maximum-loss limit. It does not open a position. **Confirm one-lot paper entry** fetches and validates the proposal again, rejects a changed signal or ATM contract, runs every existing risk check, and only then writes a simulated paper position. No SmartAPI order method is called and live execution remains disabled.
 
+Confirmed paper positions are monitored by the same 15-second background worker even when Chrome is closed. The exit-only monitor fetches a fresh option quote and automatically closes the simulated position if its stop is reached, the NIFTY directional signal reverses, or the configured force-exit time arrives. Quote failures leave the position open and are shown in the dashboard rather than guessing a fill. Entries remain manual and separately confirmed; this monitor cannot create a position or place a broker order.
+
 ## Functional modules
 
 ```text

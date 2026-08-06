@@ -232,11 +232,16 @@ class ConnectionManager:
         self._last_instrument_refresh_date = None
         self._last_option_archive_bucket = None
         self._last_backup_date = None
+        self._paper_cycle: Callable[[datetime], object] | None = None
         self._refresh_archive_snapshot()
 
     def snapshot(self) -> ConnectionSnapshot:
         with self._lock:
             return self._snapshot
+
+    def register_paper_cycle(self, callback: Callable[[datetime], object]) -> None:
+        """Attach an exit-only paper monitor to the existing background worker."""
+        self._paper_cycle = callback
 
     def _refresh_archive_snapshot(self) -> None:
         stats = self.archive.stats()
@@ -386,21 +391,8 @@ class ConnectionManager:
         )
         if instrument is None:
             raise ConnectionActionError("No matching ATM option is archived")
-        try:
-            try:
-                response = getattr(smart_api, "getMarketData")(
-                    "LTP", {instrument.exchange: [instrument.token]}
-                )
-            except (AttributeError, TypeError, RuntimeError):
-                response = getattr(smart_api, "ltpData")(
-                    instrument.exchange, instrument.symbol, instrument.token
-                )
-            price = _quote_price(response)
-        except Exception as exc:
-            raise ConnectionActionError(
-                f"Option quote failed · {_safe_detail(str(exc), ())}"
-            ) from exc
-        quote = Quote(instrument.symbol, price, now)
+        quote = self.quote_instrument(instrument, now)
+        price = quote.price
         expected_fill = price * (1 + self._settings.paper_slippage_bps / 10_000)
         risk_budget = self._settings.max_loss_per_trade * 0.8
         fees = 2 * self._settings.paper_fee_per_order
@@ -419,6 +411,33 @@ class ConnectionManager:
             reason=reason,
             estimated_max_loss=estimated_loss,
         )
+
+    def quote_instrument(
+        self, instrument: Instrument, observed_at: datetime | None = None
+    ) -> Quote:
+        """Fetch one display-safe market quote without exposing an order method."""
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        with self._lock:
+            smart_api = self._smart_api
+        if smart_api is None:
+            raise ConnectionActionError("Angel One is not connected")
+        try:
+            try:
+                response = getattr(smart_api, "getMarketData")(
+                    "LTP", {instrument.exchange: [instrument.token]}
+                )
+            except (AttributeError, TypeError, RuntimeError):
+                response = getattr(smart_api, "ltpData")(
+                    instrument.exchange, instrument.symbol, instrument.token
+                )
+            price = _quote_price(response)
+        except Exception as exc:
+            raise ConnectionActionError(
+                f"Option quote failed · {_safe_detail(str(exc), ())}"
+            ) from exc
+        return Quote(instrument.symbol, price, now)
 
     def start_background_monitor(self, interval_seconds: float = 15) -> None:
         """Start one read-only market-data worker for this application process."""
@@ -499,8 +518,9 @@ class ConnectionManager:
 
     def _monitor_loop(self, interval_seconds: float) -> None:
         while not self._monitor_stop.is_set():
+            now = datetime.now(self._settings.timezone)
             try:
-                self.run_background_cycle()
+                self.run_background_cycle(now)
             except (ConnectionActionError, FileNotFoundError, ValueError) as exc:
                 with self._lock:
                     self._snapshot = replace(
@@ -508,6 +528,16 @@ class ConnectionManager:
                         monitor_status="retrying",
                         monitor_error=_safe_detail(str(exc), ()),
                     )
+            finally:
+                if self._paper_cycle is not None:
+                    try:
+                        self._paper_cycle(now)
+                    except Exception as exc:
+                        with self._lock:
+                            self._snapshot = replace(
+                                self._snapshot,
+                                monitor_error=f"Paper exit monitor failed: {_safe_detail(str(exc), ())}",
+                            )
             self._monitor_stop.wait(interval_seconds)
 
     def connect_angel(self) -> ConnectionSnapshot:

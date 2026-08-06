@@ -140,7 +140,7 @@ def test_web_connection_actions_show_nifty_and_telegram_status(tmp_path: Path) -
     assert "15000" in quote.text
     assert "NIFTY five-minute market intelligence" in intelligence.text
     assert "EMA 9" in intelligence.text
-    assert "BULLISH" in intelligence.text
+    assert "Read-only signal" in intelligence.text
     assert "no order was placed" in intelligence.text
     assert "Telegram test alert sent" in telegram.text
     csv_export = client.get("/archive/candles.csv", auth=auth())

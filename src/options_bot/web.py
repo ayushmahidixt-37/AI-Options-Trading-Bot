@@ -18,6 +18,7 @@ from .domain import PaperOrderRequest
 from .runner import build_application
 from .config import Settings
 from .health import healthcheck
+from .paper_monitor import PaperPositionMonitor
 from .risk import RiskRejected
 
 security = HTTPBasic()
@@ -34,6 +35,8 @@ def create_web_app(
         raise ValueError("A web UI password is required")
     application = build_application(settings)
     connections = connection_manager or ConnectionManager(settings)
+    paper_monitor = PaperPositionMonitor(application, connections)
+    connections.register_paper_cycle(paper_monitor.run_cycle)
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     latest_backtest: BacktestResult | None = None
     latest_proposal: PaperTradeProposal | None = None
@@ -78,6 +81,7 @@ def create_web_app(
             "connections": connections.snapshot(),
             "backtest": latest_backtest,
             "proposal": latest_proposal,
+            "paper_monitor": paper_monitor.snapshot(),
             "message": message,
             "ok": ok,
         }
