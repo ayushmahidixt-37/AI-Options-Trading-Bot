@@ -37,7 +37,7 @@ python -m pip install --upgrade pip setuptools wheel
 
 # Install only what is needed to run the dashboard. The dev extra includes Ruff,
 # whose Rust release build can exceed the memory available on Android tablets.
-python -m pip install fastapi jinja2 pyotp python-multipart smartapi-python tzdata uvicorn
+python -m pip install fastapi jinja2 logzero pyotp python-multipart smartapi-python tzdata uvicorn websocket-client
 python -m pip install --no-deps -e .
 
 mkdir -p "${DATA_DIR}"
@@ -67,7 +67,7 @@ PY
 mkdir -p "${DATA_DIR}"
 
 python -m compileall -q src
-python -c "from zoneinfo import ZoneInfo; import fastapi, jinja2, uvicorn; import options_bot; ZoneInfo('Asia/Kolkata')"
+python -c "from zoneinfo import ZoneInfo; from SmartApi.smartConnect import SmartConnect; import fastapi, jinja2, uvicorn; import options_bot; ZoneInfo('Asia/Kolkata')"
 
 if grep -qE '^(ANGEL_API_KEY|ANGEL_CLIENT_CODE|ANGEL_PASSWORD|ANGEL_TOTP_SECRET|TELEGRAM_BOT_TOKEN|TELEGRAM_CHAT_ID)=[[:space:]]*$' "${CREDENTIALS_FILE}"; then
   echo

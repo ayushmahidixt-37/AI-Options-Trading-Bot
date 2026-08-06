@@ -8,6 +8,12 @@ from options_bot.config import Settings
 from options_bot.connections import ConnectionActionError, ConnectionManager
 
 
+def test_smartapi_market_data_client_imports_with_runtime_dependencies() -> None:
+    from SmartApi.smartConnect import SmartConnect
+
+    assert SmartConnect.__name__ == "SmartConnect"
+
+
 def settings(tmp_path: Path, credentials_path: Path) -> Settings:
     return Settings.from_env(
         {
