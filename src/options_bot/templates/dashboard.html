@@ -73,6 +73,7 @@
           <h3>NIFTY</h3>
           <p>Spot: <strong>{{ '%.2f'|format(connections.nifty_price) if connections.nifty_price else 'Not loaded' }}</strong></p>
           <p>Updated: {{ connections.quote_observed_at.strftime('%Y-%m-%d %H:%M:%S %Z') if connections.quote_observed_at else 'Never' }}</p>
+          {% if connections.quote_error %}<p class="blocked">Reason: {{ connections.quote_error }}</p>{% endif %}
           <p>Refresh: every 15 seconds after connection</p>
           <form id="nifty-refresh-form" method="post" action="/actions/nifty-refresh"><button class="secondary" type="submit">Refresh NIFTY</button></form>
         </div>

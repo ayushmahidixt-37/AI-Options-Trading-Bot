@@ -114,6 +114,36 @@ def test_rejected_login_shows_safe_angel_error_code_and_message(tmp_path: Path) 
     assert "api-key" not in str(error.value)
 
 
+def test_rejected_nifty_quote_shows_safe_error_code_and_message(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+
+    class QuoteRejectingApi:
+        def generateSession(self, *_args):
+            return {"status": True, "data": {"jwtToken": "secret"}}
+
+        def ltpData(self, *_args):
+            return {
+                "status": False,
+                "errorcode": "AB5678",
+                "message": "Invalid symbol for api-key",
+                "data": None,
+            }
+
+    manager = ConnectionManager(
+        settings(tmp_path, credentials),
+        smart_api_factory=lambda _api_key: QuoteRejectingApi(),
+        totp_factory=lambda _secret: "123456",
+    )
+    manager.connect_angel()
+
+    with pytest.raises(ConnectionActionError, match="AB5678") as error:
+        manager.refresh_nifty()
+
+    snapshot = manager.snapshot()
+    assert snapshot.quote_error == "AB5678 · Invalid symbol for [redacted]"
+    assert "api-key" not in str(error.value)
+
+
 def test_sends_alert_only_telegram_message(tmp_path: Path) -> None:
     credentials = credential_file(tmp_path)
     messages: list[str] = []

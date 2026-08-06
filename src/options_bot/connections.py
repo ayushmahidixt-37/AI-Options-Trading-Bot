@@ -29,6 +29,7 @@ class ConnectionSnapshot:
     telegram_status: str = "not tested"
     nifty_price: float | None = None
     quote_observed_at: datetime | None = None
+    quote_error: str | None = None
     last_message: str | None = None
     angel_error: str | None = None
 
@@ -142,20 +143,37 @@ class ConnectionManager:
             smart_api = self._smart_api
         if smart_api is None:
             raise ConnectionActionError("Connect Angel One before refreshing NIFTY")
+        credentials = load_credentials(self._settings.credentials_path)
+        secret_values = tuple(value.strip() for value in credentials.values() if value.strip())
         try:
             response = getattr(smart_api, "ltpData")(NIFTY_EXCHANGE, NIFTY_SYMBOL, NIFTY_TOKEN)
-            data = response.get("data") if isinstance(response, dict) else None
-            price = float(data["ltp"])
-            if price <= 0:
-                raise ValueError("non-positive quote")
         except Exception as exc:
+            detail = _safe_detail(f"{type(exc).__name__}: {exc}", secret_values)
+            message = f"NIFTY quote request failed · {detail}"
             with self._lock:
                 self._snapshot = replace(
                     self._snapshot,
                     angel_status="quote failed",
-                    last_message="NIFTY quote refresh failed",
+                    quote_error=detail,
+                    last_message=message,
                 )
-            raise ConnectionActionError("NIFTY quote refresh failed") from exc
+            raise ConnectionActionError(message) from exc
+        data = response.get("data") if isinstance(response, dict) else None
+        try:
+            price = float(data["ltp"])
+            if price <= 0:
+                raise ValueError("non-positive quote")
+        except (KeyError, TypeError, ValueError) as exc:
+            detail = _rejection_detail(response, secret_values)
+            message = f"NIFTY quote refresh failed · {detail}"
+            with self._lock:
+                self._snapshot = replace(
+                    self._snapshot,
+                    angel_status="quote failed",
+                    quote_error=detail,
+                    last_message=message,
+                )
+            raise ConnectionActionError(message) from exc
         now = datetime.now(self._settings.timezone)
         with self._lock:
             self._snapshot = replace(
@@ -163,6 +181,7 @@ class ConnectionManager:
                 angel_status="connected",
                 nifty_price=price,
                 quote_observed_at=now,
+                quote_error=None,
                 last_message="NIFTY quote refreshed",
             )
             return self._snapshot
