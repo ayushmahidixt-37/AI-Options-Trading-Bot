@@ -79,6 +79,27 @@ class PaperLedger:
                     event_type TEXT NOT NULL,
                     details TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS paper_trade_journal (
+                    order_id INTEGER PRIMARY KEY REFERENCES paper_orders(id),
+                    signal_at TEXT,
+                    direction TEXT NOT NULL,
+                    nifty_spot REAL,
+                    ema_fast REAL,
+                    ema_slow REAL,
+                    rsi_value REAL,
+                    atr_value REAL,
+                    confidence REAL,
+                    expiry TEXT,
+                    strike REAL,
+                    estimated_max_loss REAL,
+                    max_favorable_points REAL NOT NULL DEFAULT 0,
+                    max_adverse_points REAL NOT NULL DEFAULT 0,
+                    data_warning TEXT
+                );
+                CREATE TABLE IF NOT EXISTS runtime_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
             )
             con.execute(
@@ -147,6 +168,91 @@ class PaperLedger:
                     "SELECT * FROM bot_events ORDER BY id DESC LIMIT ?", (max(1, limit),)
                 )
             )
+
+    def set_state(self, key: str, value: str) -> None:
+        with self.connect() as con:
+            con.execute(
+                "INSERT INTO runtime_state(key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+
+    def get_state(self, key: str, default: str = "") -> str:
+        with self.connect() as con:
+            row = con.execute("SELECT value FROM runtime_state WHERE key=?", (key,)).fetchone()
+        return str(row[0]) if row else default
+
+    def record_trade_journal(self, order_id: int, values: dict[str, object]) -> None:
+        columns = ["order_id", *values]
+        placeholders = ",".join("?" for _ in columns)
+        with self.connect() as con:
+            con.execute(
+                f"INSERT OR REPLACE INTO paper_trade_journal({','.join(columns)}) "
+                f"VALUES ({placeholders})",
+                (order_id, *values.values()),
+            )
+
+    def update_trade_excursion(self, order_id: int, option_points: float) -> None:
+        with self.connect() as con:
+            con.execute(
+                """UPDATE paper_trade_journal
+                   SET max_favorable_points=MAX(max_favorable_points, ?),
+                       max_adverse_points=MAX(max_adverse_points, ?)
+                   WHERE order_id=?""",
+                (max(0.0, option_points), max(0.0, -option_points), order_id),
+            )
+
+    def trade_journal(self, limit: int = 100) -> list[sqlite3.Row]:
+        with self.connect() as con:
+            return list(
+                con.execute(
+                    """SELECT o.*, j.signal_at, j.direction, j.nifty_spot,
+                              j.ema_fast, j.ema_slow, j.rsi_value, j.atr_value,
+                              j.confidence, j.expiry, j.strike,
+                              j.estimated_max_loss, j.max_favorable_points,
+                              j.max_adverse_points, j.data_warning
+                       FROM paper_orders o JOIN paper_trade_journal j ON j.order_id=o.id
+                       ORDER BY o.id DESC LIMIT ?""",
+                    (max(1, limit),),
+                )
+            )
+
+    def performance_summary(self, start_date: str | None = None) -> dict[str, object]:
+        with self.connect() as con:
+            row = con.execute(
+                """SELECT COUNT(*) AS trades,
+                          SUM(CASE WHEN realized_pnl>0 THEN 1 ELSE 0 END) AS wins,
+                          COALESCE(AVG(CASE WHEN realized_pnl>0 THEN realized_pnl END), 0) AS average_win,
+                          COALESCE(AVG(CASE WHEN realized_pnl<=0 THEN realized_pnl END), 0) AS average_loss,
+                          COALESCE(SUM(realized_pnl), 0) AS net_pnl,
+                          COALESCE(SUM(CASE WHEN realized_pnl>0 THEN realized_pnl ELSE 0 END), 0) AS gross_profit,
+                          ABS(COALESCE(SUM(CASE WHEN realized_pnl<0 THEN realized_pnl ELSE 0 END), 0)) AS gross_loss
+                   FROM paper_orders
+                   WHERE status='CLOSED' AND (? IS NULL OR trading_date>=?)""",
+                (start_date, start_date),
+            ).fetchone()
+            pnl_rows = con.execute(
+                """SELECT realized_pnl FROM paper_orders
+                   WHERE status='CLOSED' AND (? IS NULL OR trading_date>=?)
+                   ORDER BY closed_at, id""",
+                (start_date, start_date),
+            ).fetchall()
+        result = {key: row[key] or 0 for key in row.keys()}
+        trades = int(result["trades"])
+        result["win_rate"] = float(result["wins"]) / trades if trades else 0.0
+        loss = float(result["gross_loss"])
+        result["profit_factor"] = float(result["gross_profit"]) / loss if loss else None
+        average_loss = abs(float(result["average_loss"]))
+        result["reward_risk"] = (
+            float(result["average_win"]) / average_loss if average_loss else None
+        )
+        equity = peak = max_drawdown = 0.0
+        for pnl_row in pnl_rows:
+            equity += float(pnl_row[0])
+            peak = max(peak, equity)
+            max_drawdown = max(max_drawdown, peak - equity)
+        result["max_drawdown"] = round(max_drawdown, 2)
+        return result
 
     def insert_open(self, values: dict[str, object]) -> int:
         columns = ",".join(values)

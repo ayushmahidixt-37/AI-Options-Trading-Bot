@@ -5,7 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from options_bot.config import Settings
-from options_bot.connections import ConnectionManager
+from options_bot.connections import ConnectionManager, PaperTradeProposal
 from options_bot.domain import Instrument, PaperOrderRequest, Quote
 from options_bot.paper_monitor import PaperPositionMonitor
 from options_bot.runner import build_application
@@ -131,3 +131,63 @@ def test_monitor_kill_switch_requires_confirmation_and_closes_all(tmp_path) -> N
     assert application.ledger.open_positions() == []
     assert application.ledger.daily_summary("2026-08-06")["trades"] == 1
     assert application.ledger.recent_events()[0]["event_type"] == "paper_kill_switch"
+
+
+def test_automatic_paper_entry_is_confirmed_persistent_and_duplicate_safe(tmp_path) -> None:
+    settings = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+        }
+    )
+    application = build_application(settings)
+    connections = ConnectionManager(settings)
+    now = datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+    instrument = Instrument(
+        "NIFTY_TEST_CE", "123", "NFO", "NIFTY", "CE", 75, now.date(), 24600
+    )
+    proposal = PaperTradeProposal(
+        "auto-1",
+        instrument,
+        Quote(instrument.symbol, 100, now),
+        96,
+        "BULLISH",
+        0.6,
+        "fixture",
+        340,
+        now,
+        24600,
+        24610,
+        24590,
+        58,
+        20,
+    )
+    connections._snapshot = replace(
+        connections.snapshot(),
+        signal_label="BULLISH",
+        latest_candle_at=now,
+        data_status="fresh",
+    )
+    connections.create_paper_proposal = lambda _now=None: proposal  # type: ignore[method-assign]
+    monitor = PaperPositionMonitor(application, connections)
+
+    try:
+        monitor.set_auto_entry(True, "wrong")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("automatic paper entry accepted incorrect confirmation")
+    monitor.set_auto_entry(True, "ENABLE AUTO PAPER")
+    first = monitor.run_cycle(now)
+    second = monitor.run_cycle(now)
+
+    assert first.auto_entry_enabled is True
+    assert len(application.ledger.open_positions()) == 1
+    assert second.auto_entry_last_action == first.auto_entry_last_action
+    assert application.ledger.get_state("auto_paper_last_signal") == now.isoformat()
+    journal = application.ledger.trade_journal()
+    assert journal[0]["direction"] == "BULLISH"
+    assert journal[0]["rsi_value"] == 58
+    restarted = PaperPositionMonitor(application, connections)
+    assert restarted.snapshot().auto_entry_enabled is True
+    assert restarted.set_auto_entry(False, "DISABLE AUTO PAPER").auto_entry_enabled is False

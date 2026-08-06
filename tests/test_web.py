@@ -57,6 +57,21 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
     assert "Run healthcheck" in response.text
     assert "Run paper scan" in response.text
     assert "No open paper positions" in response.text
+    assert "Automatic paper entries" in response.text
+    assert "DISABLED" in response.text
+
+    rejected = client.post(
+        "/actions/auto-paper",
+        data={"enabled": "true", "confirmation": "wrong"},
+        auth=auth(),
+    )
+    assert "Type ENABLE AUTO PAPER exactly" in rejected.text
+    enabled = client.post(
+        "/actions/auto-paper",
+        data={"enabled": "true", "confirmation": "ENABLE AUTO PAPER"},
+        auth=auth(),
+    )
+    assert "Automatic paper entries enabled" in enabled.text
 
 
 def test_web_health_and_scan_actions_are_safe(tmp_path: Path) -> None:

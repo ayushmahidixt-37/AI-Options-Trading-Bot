@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -87,6 +87,23 @@ def create_web_app(
                 application.clock.trading_date(now)
             ),
             "recent_events": application.ledger.recent_events(),
+            "performance_windows": (
+                ("Today", application.ledger.performance_summary(now.date().isoformat())),
+                (
+                    "Last 7 days",
+                    application.ledger.performance_summary(
+                        (now.date() - timedelta(days=6)).isoformat()
+                    ),
+                ),
+                (
+                    "Last 30 days",
+                    application.ledger.performance_summary(
+                        (now.date() - timedelta(days=29)).isoformat()
+                    ),
+                ),
+                ("All time", application.ledger.performance_summary()),
+            ),
+            "trade_journal": application.ledger.trade_journal(25),
             "message": message,
             "ok": ok,
         }
@@ -296,6 +313,7 @@ def create_web_app(
                     ),
                     fresh.quote.observed_at,
                 )
+                paper_monitor.record_proposal_context(order_id, fresh)
                 result_message, result_ok = f"Opened paper position {order_id}", True
                 application.ledger.record_event(
                     fresh.quote.observed_at.isoformat(),
@@ -328,6 +346,24 @@ def create_web_app(
             message = f"Paper kill switch complete; closed {result.positions_closed} position(s)"
             ok = True
         except (ConnectionActionError, RuntimeError, ValueError) as exc:
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
+        )
+
+    @app.post("/actions/auto-paper", response_class=HTMLResponse)
+    def configure_auto_paper(
+        request: Request,
+        enabled: bool = Form(),
+        confirmation: str = Form(),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        try:
+            snapshot = paper_monitor.set_auto_entry(enabled, confirmation)
+            message, ok = snapshot.auto_entry_last_action, True
+        except ValueError as exc:
             message, ok = str(exc), False
         return templates.TemplateResponse(
             request=request,

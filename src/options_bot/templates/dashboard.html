@@ -160,6 +160,8 @@
         · Checked: {{ paper_monitor.positions_checked }} · Closed on last cycle: {{ paper_monitor.positions_closed }}</p>
       <p>Recovered after startup: {{ paper_monitor.recovered_positions }} · Estimated open P&amp;L after paper costs: <strong>{{ '%.2f'|format(paper_monitor.total_unrealized_pnl) }}</strong></p>
       <p>Last exit action: {{ paper_monitor.last_action }}</p>
+      <p>Automatic paper entries: <span class="{{ 'blocked' if paper_monitor.auto_entry_enabled else 'safe' }}">{{ 'ENABLED' if paper_monitor.auto_entry_enabled else 'DISABLED' }}</span></p>
+      <p>{{ paper_monitor.auto_entry_last_action }}</p>
       {% if paper_monitor.error %}<p class="blocked">{{ paper_monitor.error }}</p>{% endif %}
       <form method="post" action="/actions/paper-proposal"><button class="secondary" type="submit">Create fresh paper proposal</button></form>
       {% if proposal %}
@@ -202,6 +204,22 @@
           <button class="danger" type="submit">Close all paper positions</button>
         </form>
       {% endif %}
+      <hr>
+      <h3>Automatic paper-entry control</h3>
+      <p>Disabled by default. When enabled, each newly closed actionable five-minute signal can create at most one simulated one-lot entry after all risk checks pass.</p>
+      {% if paper_monitor.auto_entry_enabled %}
+        <form method="post" action="/actions/auto-paper">
+          <input type="hidden" name="enabled" value="false">
+          <input required name="confirmation" type="text" placeholder="DISABLE AUTO PAPER" style="max-width:15rem">
+          <button class="danger" type="submit">Disable automatic paper entries</button>
+        </form>
+      {% else %}
+        <form method="post" action="/actions/auto-paper">
+          <input type="hidden" name="enabled" value="true">
+          <input required name="confirmation" type="text" placeholder="ENABLE AUTO PAPER" style="max-width:15rem">
+          <button type="submit">Enable automatic paper entries</button>
+        </form>
+      {% endif %}
     </section>
 
     <section class="card">
@@ -218,6 +236,23 @@
           </tbody></table></div>{% else %}<p>No paper lifecycle events recorded yet.</p>{% endif %}
         </div>
       </div>
+      <hr>
+      <h3>Closed-trade analytics</h3>
+      <div style="overflow-x:auto"><table><thead><tr><th>Period</th><th>Trades</th><th>Win rate</th><th>Net P&amp;L</th><th>Avg win/loss</th><th>Reward:risk</th><th>Profit factor</th><th>Max drawdown</th></tr></thead><tbody>
+      {% for label, performance in performance_windows %}<tr><td>{{ label }}</td><td>{{ performance.trades }}</td><td>{{ '%.1f%%'|format(performance.win_rate * 100) }}</td><td>{{ '%.2f'|format(performance.net_pnl) }}</td><td>{{ '%.2f'|format(performance.average_win) }} / {{ '%.2f'|format(performance.average_loss) }}</td><td>{{ '%.2f'|format(performance.reward_risk) if performance.reward_risk is not none else '-' }}</td><td>{{ '%.2f'|format(performance.profit_factor) if performance.profit_factor is not none else '-' }}</td><td>{{ '%.2f'|format(performance.max_drawdown) }}</td></tr>{% endfor %}
+      </tbody></table></div>
+      {% if trade_journal %}
+        <h3>Detailed paper journal</h3>
+        <div style="overflow-x:auto"><table><thead><tr><th>Entry</th><th>Signal</th><th>Contract</th><th>Indicators</th><th>Risk</th><th>Excursion</th><th>Exit</th><th>Net P&amp;L</th></tr></thead><tbody>
+        {% for trade in trade_journal %}<tr>
+          <td>{{ trade.created_at }}</td><td>{{ trade.direction }}<br>{{ '%.0f%%'|format(trade.confidence * 100) if trade.confidence is not none else '' }}</td>
+          <td>{{ trade.symbol }}<br>{{ trade.expiry or '' }} · {{ trade.strike or '' }}</td>
+          <td>EMA {{ trade.ema_fast or '-' }}/{{ trade.ema_slow or '-' }}<br>RSI {{ trade.rsi_value or '-' }} · ATR {{ trade.atr_value or '-' }}</td>
+          <td>Stop {{ '%.2f'|format(trade.stop_price) }}<br>Max {{ '%.2f'|format(trade.estimated_max_loss) if trade.estimated_max_loss is not none else '-' }}</td>
+          <td>Favorable {{ '%.2f'|format(trade.max_favorable_points) }}<br>Adverse {{ '%.2f'|format(trade.max_adverse_points) }}</td>
+          <td>{{ trade.close_reason or 'OPEN' }}<br>{{ trade.closed_at or '' }}</td><td>{{ '%.2f'|format(trade.realized_pnl) if trade.realized_pnl is not none else 'OPEN' }}</td>
+        </tr>{% endfor %}</tbody></table></div>
+      {% else %}<p>No journaled proposal trades yet.</p>{% endif %}
     </section>
 
     <section class="card">

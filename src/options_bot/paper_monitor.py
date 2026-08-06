@@ -7,8 +7,8 @@ import sqlite3
 from dataclasses import dataclass, replace
 from datetime import datetime
 
-from .connections import ConnectionActionError, ConnectionManager
-from .domain import Instrument
+from .connections import ConnectionActionError, ConnectionManager, PaperTradeProposal
+from .domain import Instrument, PaperOrderRequest
 from .runner import Application
 
 
@@ -23,6 +23,8 @@ class PaperMonitorSnapshot:
     total_unrealized_pnl: float = 0.0
     recovered_positions: int = 0
     position_quotes: tuple[dict[str, object], ...] = ()
+    auto_entry_enabled: bool = False
+    auto_entry_last_action: str = "Automatic paper entries are disabled."
 
 
 class PaperPositionMonitor:
@@ -34,6 +36,62 @@ class PaperPositionMonitor:
         self._lock = threading.Lock()
         self._snapshot = PaperMonitorSnapshot()
         self._first_cycle = True
+        self._auto_entry_enabled = (
+            self.application.ledger.get_state("auto_paper_enabled", "false") == "true"
+        )
+        self._snapshot = replace(
+            self._snapshot,
+            auto_entry_enabled=self._auto_entry_enabled,
+            auto_entry_last_action=(
+                "Automatic paper entries restored as enabled after restart."
+                if self._auto_entry_enabled
+                else self._snapshot.auto_entry_last_action
+            ),
+        )
+
+    def set_auto_entry(self, enabled: bool, confirmation: str) -> PaperMonitorSnapshot:
+        expected = "ENABLE AUTO PAPER" if enabled else "DISABLE AUTO PAPER"
+        if confirmation != expected:
+            raise ValueError(f"Type {expected} exactly")
+        self._auto_entry_enabled = enabled
+        self.application.ledger.set_state(
+            "auto_paper_enabled", "true" if enabled else "false"
+        )
+        now = datetime.now(self.application.settings.timezone)
+        action = "enabled" if enabled else "disabled"
+        self.application.ledger.record_event(
+            now.isoformat(), "WARNING" if enabled else "INFO", "auto_paper", action
+        )
+        with self._lock:
+            self._snapshot = replace(
+                self._snapshot,
+                auto_entry_enabled=enabled,
+                auto_entry_last_action=f"Automatic paper entries {action}.",
+            )
+            return self._snapshot
+
+    def record_proposal_context(self, order_id: int, proposal: PaperTradeProposal) -> None:
+        self.application.ledger.record_trade_journal(
+            order_id,
+            {
+                "signal_at": proposal.signal_at.isoformat() if proposal.signal_at else None,
+                "direction": proposal.direction,
+                "nifty_spot": proposal.nifty_spot,
+                "ema_fast": proposal.ema_fast,
+                "ema_slow": proposal.ema_slow,
+                "rsi_value": proposal.rsi_value,
+                "atr_value": proposal.atr_value,
+                "confidence": proposal.confidence,
+                "expiry": (
+                    proposal.instrument.expiry.isoformat()
+                    if proposal.instrument.expiry
+                    else None
+                ),
+                "strike": proposal.instrument.strike,
+                "estimated_max_loss": proposal.estimated_max_loss,
+                "data_warning": None,
+            },
+        )
 
     def snapshot(self) -> PaperMonitorSnapshot:
         with self._lock:
@@ -82,6 +140,9 @@ class PaperPositionMonitor:
                         "quoted_at": quote.observed_at,
                     }
                 )
+                self.application.ledger.update_trade_excursion(
+                    int(position["id"]), quote.price - float(position["entry_fill_price"])
+                )
                 reason = self._exit_reason(position, quote.price, signal, now)
                 if reason is None:
                     continue
@@ -99,6 +160,7 @@ class PaperPositionMonitor:
                     errors.append(f"{instrument.symbol}: Telegram exit alert failed")
             except (ConnectionActionError, RuntimeError, ValueError) as exc:
                 errors.append(f"{instrument.symbol}: {exc}")
+        auto_action = self._maybe_auto_entry(now)
         with self._lock:
             self._snapshot = replace(
                 self._snapshot,
@@ -117,9 +179,57 @@ class PaperPositionMonitor:
                     else self._snapshot.recovered_positions
                 ),
                 position_quotes=tuple(position_quotes),
+                auto_entry_enabled=self._auto_entry_enabled,
+                auto_entry_last_action=auto_action or self._snapshot.auto_entry_last_action,
             )
             self._first_cycle = False
             return self._snapshot
+
+    def _maybe_auto_entry(self, now: datetime) -> str | None:
+        if not self._auto_entry_enabled or self.application.ledger.open_positions():
+            return None
+        connection = self.connections.snapshot()
+        signal_at = connection.latest_candle_at
+        if connection.signal_label not in {"BULLISH", "BEARISH"} or signal_at is None:
+            return None
+        signal_key = signal_at.isoformat()
+        if self.application.ledger.get_state("auto_paper_last_signal") == signal_key:
+            return None
+        self.application.ledger.set_state("auto_paper_last_signal", signal_key)
+        try:
+            proposal = self.connections.create_paper_proposal(now)
+            order_id = self.application.paper_broker.buy(
+                PaperOrderRequest(
+                    instrument=proposal.instrument,
+                    lots=1,
+                    quote=proposal.quote,
+                    stop_price=proposal.stop_price,
+                    strategy="momentum-v1-auto-paper",
+                    reason=f"Auto-paper {proposal.direction} signal",
+                ),
+                now,
+            )
+            self.record_proposal_context(order_id, proposal)
+            detail = f"Opened {proposal.instrument.symbol} as paper order {order_id}"
+            self.application.ledger.record_event(
+                now.isoformat(), "INFO", "auto_paper_entry", detail
+            )
+            try:
+                self.connections.send_alert(f"Automatic paper entry: {detail}")
+            except Exception:
+                self.application.ledger.record_event(
+                    now.isoformat(),
+                    "WARNING",
+                    "telegram_alert_failed",
+                    "Automatic paper entry was opened but its Telegram alert failed",
+                )
+            return detail
+        except (ConnectionActionError, RuntimeError, ValueError) as exc:
+            detail = f"Automatic paper entry rejected: {exc}"
+            self.application.ledger.record_event(
+                now.isoformat(), "INFO", "auto_paper_rejected", detail
+            )
+            return detail
 
     def close_all(
         self, confirmation: str, observed_at: datetime | None = None

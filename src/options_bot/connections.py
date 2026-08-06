@@ -50,6 +50,12 @@ class PaperTradeProposal:
     confidence: float
     reason: str
     estimated_max_loss: float
+    signal_at: datetime | None = None
+    nifty_spot: float | None = None
+    ema_fast: float | None = None
+    ema_slow: float | None = None
+    rsi_value: float | None = None
+    atr_value: float | None = None
 
 
 @dataclass(frozen=True)
@@ -391,6 +397,11 @@ class ConnectionManager:
             confidence = self._snapshot.signal_confidence
             reason = self._snapshot.signal_reason
             data_status = self._snapshot.data_status
+            signal_at = self._snapshot.latest_candle_at
+            ema_fast = self._snapshot.ema_fast
+            ema_slow = self._snapshot.ema_slow
+            rsi_value = self._snapshot.rsi_value
+            atr_value = self._snapshot.atr_value
         if smart_api is None or not spot:
             raise ConnectionActionError("Connect Angel One and load NIFTY spot first")
         if data_status != "fresh" or signal not in {"BULLISH", "BEARISH"}:
@@ -421,6 +432,12 @@ class ConnectionManager:
             confidence=confidence or 0.0,
             reason=reason,
             estimated_max_loss=estimated_loss,
+            signal_at=signal_at,
+            nifty_spot=spot,
+            ema_fast=ema_fast,
+            ema_slow=ema_slow,
+            rsi_value=rsi_value,
+            atr_value=atr_value,
         )
 
     def quote_instrument(
