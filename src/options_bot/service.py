@@ -47,7 +47,7 @@ class PaperService:
             fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_UN)
             self._lock_handle.close()
             self._lock_handle = None
-        self.lock_path.unlink(missing_ok=True)
+            self.lock_path.unlink(missing_ok=True)
 
     def stop(self, _signal: int | None = None, _frame: FrameType | None = None) -> None:
         self._stopping = True

@@ -20,3 +20,14 @@ def test_entry_window_and_force_exit(tmp_path: Path) -> None:
     assert not clock.entries_allowed(late)
     assert not clock.entries_allowed(weekend)
     assert clock.force_exit_due(late)
+
+
+def test_configured_nse_holiday_blocks_entries_and_force_exit(tmp_path: Path) -> None:
+    cfg = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "NSE_HOLIDAYS": "2026-08-03"}
+    )
+    clock = MarketClock(cfg)
+    holiday = datetime(2026, 8, 3, 10, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
+
+    assert not clock.entries_allowed(holiday)
+    assert not clock.force_exit_due(holiday.replace(hour=15, minute=21))

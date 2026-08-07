@@ -51,7 +51,7 @@ class RiskEngine:
         if self.ledger.trades_on(trading_date) >= self.settings.max_trades_per_day:
             raise RiskRejected("Daily trade limit reached")
         account = self.ledger.account()
-        if float(account["realized_pnl"]) <= -self.settings.max_daily_net_loss:
+        if self.ledger.realized_pnl_on(trading_date) <= -self.settings.max_daily_net_loss:
             raise RiskRejected("Daily loss circuit breaker is latched")
         used = sum(
             float(row["entry_fill_price"]) * int(row["units"])
