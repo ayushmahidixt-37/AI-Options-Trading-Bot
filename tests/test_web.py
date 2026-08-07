@@ -74,6 +74,7 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
     assert "Automatic paper entries enabled" in enabled.text
     assert "Research workspace" in enabled.text
     assert "Data &amp; operations" in enabled.text
+    assert "Readiness review" in enabled.text
 
 
 def test_strategy_validation_form_validates_ranges_and_exports(tmp_path: Path) -> None:
@@ -105,6 +106,32 @@ def test_strategy_validation_form_validates_ranges_and_exports(tmp_path: Path) -
     )
     assert "Strategy validation completed" in valid.text
     assert client.get("/validation/comparison.csv", auth=auth()).status_code == 200
+
+
+def test_readiness_review_is_persistent_and_never_approves_live(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+    rejected = client.post(
+        "/actions/readiness-review",
+        data={"confirmation": "wrong"},
+        auth=auth(),
+    )
+    assert "Type SAVE PAPER REVIEW exactly" in rejected.text
+
+    saved = client.post(
+        "/actions/readiness-review",
+        data={
+            "confirmation": "SAVE PAPER REVIEW",
+            "broker_restrictions": "true",
+            "recovery_drill": "true",
+            "user_acceptance": "true",
+        },
+        auth=auth(),
+    )
+    assert "Paper-readiness acknowledgements saved" in saved.text
+    assert "NOT APPROVED" in saved.text
+    report = client.get("/readiness/report.csv", auth=auth())
+    assert report.status_code == 200
+    assert "live_trading_approved,false" in report.text
 
 
 def test_web_health_and_scan_actions_are_safe(tmp_path: Path) -> None:

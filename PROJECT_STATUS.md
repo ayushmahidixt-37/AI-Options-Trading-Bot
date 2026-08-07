@@ -100,6 +100,16 @@ paper results are simulations and may not represent future results.
 - A candidate is selected from validation data; only that candidate is evaluated
   on the untouched test range, with CSV comparison export.
 
+### Paper-readiness review gate
+
+- Evidence checklist for archive coverage/gaps/integrity, paper-trade count and
+  drawdown, force exits, heartbeat/failures, backups, credential permissions,
+  dashboard password, and the paper-only boundary.
+- Persisted manual acknowledgements for broker restrictions, recovery drills,
+  and operator acceptance, plus a downloadable review CSV.
+- A completed review explicitly records `live_trading_approved=false`; it never
+  changes configuration or exposes broker order submission.
+
 ## Important local files
 
 | Purpose | Tablet path relative to repository |
@@ -165,7 +175,7 @@ Before adding another trading feature, collect forward paper evidence:
 Both phases are implemented. Results remain preliminary until the archive has
 enough complete, low-gap sessions in every split.
 
-## Next review phase
+## Completed review phase
 
 ### Phase C — review gate, not automatic live deployment
 
@@ -173,6 +183,10 @@ Only after extended forward-paper evidence, perform a documented readiness
 review covering reliability, drawdown, data quality, broker restrictions,
 security, operational recovery, and user acceptance. Live trading is not an
 approved phase and must require a separate explicit decision and design review.
+
+The evidence gate is implemented, but it will remain blocked until the tablet
+has collected the required forward-paper evidence and manual reviews. Passing
+the gate still does not approve or enable live trading.
 
 ## Known limitations and cautions
 
@@ -217,6 +231,8 @@ At the end of every development session, update this file when applicable:
 - Guarded automatic paper entries are complete and disabled by default.
 - Operational hardening, daily Telegram reporting, backup rotation, and the
   strategy validation workspace are complete.
+- The paper-readiness evidence gate and CSV review export are complete; live
+  trading remains unapproved and unreachable.
 - The most valuable next activity is collecting complete forward paper sessions,
   preserving the SQLite archive, and reviewing Phase B only when every split has
   adequate low-gap option history.

@@ -209,6 +209,12 @@ Then run `chmod 700 ~/.termux/boot/start-options-bot`. Automatic Android startup
 
 The Research workspace compares documented variants over three required chronological, non-overlapping ranges. Development and validation results are visible for every variant; one candidate is selected using validation results and evaluated once against the untouched test range. Other variants never see test results. Comparison CSV exports include trades, net P&L, and drawdown. Gaps or missing option history keep the report preliminary.
 
+### Paper-readiness review
+
+The Readiness review workspace turns the documented review gate into an evidence checklist. It assesses archive sessions, gaps and integrity; closed paper trades and drawdown; overdue positions; monitor heartbeat and failures; backups; credential-file permissions; dashboard password strength; and the enforced paper-only configuration. Broker restrictions, recovery drills, and operator acceptance require explicit persisted acknowledgements using `SAVE PAPER REVIEW`.
+
+The downloadable readiness CSV always contains `live_trading_approved=false`. Even a fully passing paper review does not change configuration, unlock the quarantined live adapter, or authorize broker orders.
+
 ## Functional modules
 
 ```text
@@ -225,6 +231,7 @@ paper_broker.py            conservative simulated fills
 ledger.py                  transactional SQLite state
 backtest.py                chronological, no-same-bar-look-ahead replay
 validation.py              split-safe offline strategy comparison workspace
+readiness.py               evidence-based paper review with no live-trading switch
 reporting.py               paper-account reports
 notifications.py           alert-only Telegram sender
 actions.py                 UI-safe paper action helpers

@@ -47,6 +47,8 @@
     .btn.secondary { background:#344054; } .btn.ghost { background:#f2f4f7; color:#344054; } .btn.danger { background:#d92d20; } .btn:disabled { opacity:.55; cursor:wait; }
     input { min-height:40px; padding:8px 10px; border:1px solid #d0d5dd; border-radius:9px; background:white; color:var(--ink); }
     input[type=date] { min-width:145px; }
+    input[type=checkbox] { min-height:0; width:18px; height:18px; accent-color:var(--brand); }
+    .check { display:flex; align-items:flex-start; gap:10px; font-size:.92rem; font-weight:600; }
     label { display:grid; gap:5px; color:#475467; font-size:.84rem; font-weight:650; }
     .form-row { display:flex; align-items:end; gap:10px; flex-wrap:wrap; }
     .divider { border:0; border-top:1px solid var(--line); margin:18px 0; }
@@ -78,6 +80,7 @@
       <button class="tab" data-panel="paper" aria-selected="false">Paper trading</button>
       <button class="tab" data-panel="research" aria-selected="false">Research</button>
       <button class="tab" data-panel="operations" aria-selected="false">Data &amp; operations</button>
+      <button class="tab" data-panel="readiness" aria-selected="false">Readiness review</button>
     </nav>
     {% if message %}<div class="notice {{ 'good' if ok else 'bad' }}" role="status"><strong>{{ 'Done' if ok else 'Attention' }}</strong><span>{{ message }}</span></div>{% endif %}
 
@@ -85,6 +88,7 @@
     {% include "partials/_paper.html" %}
     {% include "partials/_research.html" %}
     {% include "partials/_operations.html" %}
+    {% include "partials/_readiness.html" %}
   </main>
   <script>
     const tabs = [...document.querySelectorAll('.tab')];
