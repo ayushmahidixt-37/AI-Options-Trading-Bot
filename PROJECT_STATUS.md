@@ -89,6 +89,8 @@ paper results are simulations and may not represent future results.
 - Deduplicated repeated-failure and recovery Telegram notifications.
 - One deduplicated post-force-exit Telegram daily report.
 - Automatic archive backup rotation using the configured retention count.
+- Termux startup now fails clearly on tracked local changes and requires a
+  fast-forward to the latest `origin/main`, preventing silent use of old code.
 
 ### Strategy validation workspace
 
