@@ -95,6 +95,8 @@ paper results are simulations and may not represent future results.
 - Automatic archive backup rotation using the configured retention count.
 - Termux startup now fails clearly on tracked local changes and requires a
   fast-forward to the latest `origin/main`, preventing silent use of old code.
+- CI pins Ruff below the next breaking rule expansion so local and GitHub lint
+  checks evaluate the same documented rule set.
 
 ### Strategy validation workspace
 
