@@ -182,7 +182,7 @@ Confirmed paper positions are monitored by the same 15-second background worker 
 
 Every confirmed proposal is also written to a durable paper journal with its signal candle, NIFTY spot, EMA, RSI, ATR, confidence, selected contract, estimated risk, favorable/adverse option movement, exit reason, fees, and net result. The dashboard summarizes all closed journaled trades with win rate, average win/loss, and profit factor. Journal data remains in the paper SQLite database across restarts.
 
-Automatic **paper-only** entries are available but disabled by default. Enabling them requires typing `ENABLE AUTO PAPER` exactly. A newly closed actionable five-minute signal is processed at most once, survives restarts without duplicate entry, and must still pass the existing quote freshness, time-window, one-lot, open-position, per-trade loss, daily-trade, daily-loss, and capital checks. Disable it by typing `DISABLE AUTO PAPER`. This feature writes simulated ledger rows only and has no SmartAPI order call.
+Automatic **paper-only** entries are available but disabled by default. Use the Automation toggle and accept the browser confirmation to start monitoring immediately. A newly closed actionable five-minute signal is processed at most once, survives restarts without duplicate entry, and must still pass the existing quote freshness, time-window, one-lot, open-position, per-trade loss, daily-trade, daily-loss, and capital checks. Turn the toggle off to prevent new entries; existing paper positions continue to be monitored for exits. This feature writes simulated ledger rows only and has no SmartAPI order call.
 
 ### Reliability and detailed backtests
 

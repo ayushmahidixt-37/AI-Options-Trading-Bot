@@ -463,7 +463,15 @@ def create_web_app(
     ) -> HTMLResponse:
         try:
             snapshot = paper_monitor.set_auto_entry(enabled, confirmation)
-            message, ok = snapshot.auto_entry_last_action, True
+            if enabled:
+                cycle = paper_monitor.run_cycle()
+                message = (
+                    "Automatic paper entries enabled; monitoring started immediately. "
+                    f"{cycle.auto_entry_last_action}"
+                )
+            else:
+                message = snapshot.auto_entry_last_action
+            ok = True
         except ValueError as exc:
             message, ok = str(exc), False
         return templates.TemplateResponse(

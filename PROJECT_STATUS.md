@@ -28,8 +28,8 @@ paper results are simulations and may not represent future results.
 - The currently reachable Angel integration is market-data only.
 - Telegram is outbound-only; it does not accept trading commands.
 - Automatic entries create paper-ledger rows only and are disabled by default.
-- Enabling automatic paper entries requires the exact text
-  `ENABLE AUTO PAPER`; disabling requires `DISABLE AUTO PAPER`.
+- Enabling automatic paper entries requires an explicit toggle confirmation;
+  disabling the toggle prevents new entries while preserving exit monitoring.
 - Never add a live-order call as an incidental part of another phase.
 - Never commit or print Angel, Telegram, password, PIN, or TOTP secrets.
 
@@ -66,6 +66,8 @@ paper results are simulations and may not represent future results.
 
 - Two-step manually confirmed one-lot paper proposals.
 - Optional automatic paper-only entries, explicitly enabled and persisted.
+- The automation toggle starts a paper-monitor cycle immediately; periodic page
+  refreshes always return to the GET dashboard instead of reloading POST routes.
 - One attempt per closed signal candle prevents restart duplicates.
 - Central checks for entry time, quote freshness, lots, maximum trade loss,
   open positions, duplicate symbols, daily trades, daily loss, and capital.

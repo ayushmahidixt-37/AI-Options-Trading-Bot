@@ -58,7 +58,10 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
     assert "Run paper scan" in response.text
     assert "No open paper positions" in response.text
     assert "Automatic paper entries" in response.text
-    assert "DISABLED" in response.text
+    assert "OFF" in response.text
+    assert 'role="switch"' in response.text
+    assert "location.reload()" not in response.text
+    assert "location.replace(`/${location.hash}`)" in response.text
 
     rejected = client.post(
         "/actions/auto-paper",
@@ -72,6 +75,8 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
         auth=auth(),
     )
     assert "Automatic paper entries enabled" in enabled.text
+    assert "monitoring started immediately" in enabled.text
+    assert "RUNNING" in enabled.text
     assert "Research workspace" in enabled.text
     assert "Data &amp; operations" in enabled.text
     assert "Readiness review" in enabled.text
