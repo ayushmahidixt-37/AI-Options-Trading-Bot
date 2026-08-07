@@ -125,6 +125,26 @@ class PaperLedger:
         with self.connect() as con:
             return list(con.execute("SELECT * FROM paper_orders WHERE status='OPEN' ORDER BY id"))
 
+    def capital_summary(self) -> dict[str, float | int]:
+        """Return paper capital committed to open positions and still available."""
+        account = self.account()
+        positions = self.open_positions()
+        premium_committed = sum(
+            float(row["entry_fill_price"]) * int(row["units"]) for row in positions
+        )
+        open_entry_fees = sum(float(row["entry_fee"]) for row in positions)
+        capital_used = premium_committed + open_entry_fees
+        capital_before_open_pnl = (
+            float(account["starting_capital"]) + float(account["realized_pnl"])
+        )
+        return {
+            "premium_committed": round(premium_committed, 2),
+            "open_entry_fees": round(open_entry_fees, 2),
+            "capital_used": round(capital_used, 2),
+            "capital_available": round(capital_before_open_pnl - capital_used, 2),
+            "open_positions": len(positions),
+        }
+
     def trades_on(self, trading_date: str) -> int:
         with self.connect() as con:
             row = con.execute(

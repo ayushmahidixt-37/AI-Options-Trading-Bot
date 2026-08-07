@@ -14,7 +14,8 @@ def test_safe_defaults_are_paper_only(tmp_path: Path) -> None:
     assert settings.live_trading_enabled is False
     assert settings.auto_start is False
     assert settings.max_lots_per_trade == 1
-    assert settings.max_open_positions == 1
+    assert settings.max_open_positions == 2
+    assert settings.max_trades_per_day == 0
 
 
 @pytest.mark.parametrize(

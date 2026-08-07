@@ -75,6 +75,12 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
     assert "No open paper positions" in response.text
     assert "Automatic paper entries" in response.text
     assert "OFF" in response.text
+    assert "Premium committed" in response.text
+    assert "Capital used incl. entry fees" in response.text
+    assert "Capital available" in response.text
+    assert "Open this page refresh every 15 seconds" not in response.text
+    assert "Open-position prices and this page refresh every 15 seconds" in response.text
+    assert "window.setTimeout(refreshDashboard, 15000)" in response.text
     assert 'role="switch"' in response.text
     assert "location.reload()" not in response.text
     assert "location.replace(`/${location.hash}`)" in response.text

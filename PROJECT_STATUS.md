@@ -70,6 +70,12 @@ paper results are simulations and may not represent future results.
   refreshes always return to the GET dashboard instead of reloading POST routes.
 - Browser refreshes and history navigation that revisit any `/actions/...` URL
   are redirected to the matching dashboard workspace instead of returning 405.
+- Forward-paper collection defaults to two different concurrent contracts and
+  no daily trade-count cap (`0`); fresh-signal deduplication, one-lot sizing,
+  duplicate-contract, entry-window, daily-loss, capital, and quote gates remain.
+- Paper capital and position tables expose premium committed, total entry cost,
+  available capital, estimated equity, fresh LTP/P&L, and quote time, with a
+  fixed 15-second monitor and dashboard refresh cadence.
 - One attempt per closed signal candle prevents restart duplicates.
 - Central checks for entry time, quote freshness, lots, maximum trade loss,
   open positions, duplicate symbols, daily trades, daily loss, and capital.
@@ -95,6 +101,8 @@ paper results are simulations and may not represent future results.
 - Automatic archive backup rotation using the configured retention count.
 - Termux startup now fails clearly on tracked local changes and requires a
   fast-forward to the latest `origin/main`, preventing silent use of old code.
+- Termux safely migrates untouched legacy `1`-position/`3`-trades defaults to
+  the two-position/no-count-cap forward-paper collection profile.
 - CI pins Ruff below the next breaking rule expansion so local and GitHub lint
   checks evaluate the same documented rule set.
 
