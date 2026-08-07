@@ -1,8 +1,12 @@
 # AI Options Trading Bot
 
-Server-ready foundations for an options bot that is deliberately limited to
-**paper trading**. Angel One market-data support is the next milestone; this
-release contains no reachable broker order-submission implementation.
+> **Session handoff:** Read [`PROJECT_STATUS.md`](PROJECT_STATUS.md) first for
+> the current implementation, safety boundary, validation plan, and next phase.
+
+Tablet-friendly foundations for an options bot deliberately limited to
+**paper trading**, with Angel One read-only market data, durable archives,
+backtesting, and guarded simulated entries. This release contains no reachable
+broker order-submission implementation.
 
 > Automated trading cannot guarantee profits or passive income. Keep the bot in
 > paper mode until its data, strategy, risk controls, and operations have been
