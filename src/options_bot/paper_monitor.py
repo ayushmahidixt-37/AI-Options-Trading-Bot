@@ -1,4 +1,4 @@
-"""Automatic exits for confirmed paper positions; never creates entries."""
+"""Guarded automatic paper entries and exits; never submits broker orders."""
 
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ class PaperMonitorSnapshot:
 
 
 class PaperPositionMonitor:
-    """Apply stop, reversal, and forced-exit rules to paper positions only."""
+    """Collect guarded entries and apply exits to simulated positions only."""
 
     def __init__(self, application: Application, connections: ConnectionManager) -> None:
         self.application = application
@@ -195,8 +195,14 @@ class PaperPositionMonitor:
             return self._snapshot
 
     def _maybe_auto_entry(self, now: datetime) -> str | None:
-        if not self._auto_entry_enabled or self.application.ledger.open_positions():
+        if not self._auto_entry_enabled:
             return None
+        open_positions = self.application.ledger.open_positions()
+        if len(open_positions) >= self.application.settings.max_open_positions:
+            return (
+                "Automatic paper entry waiting: open-position capacity "
+                f"{len(open_positions)}/{self.application.settings.max_open_positions}"
+            )
         block_reason = self.connections.entry_block_reason(now)
         if block_reason:
             return f"Automatic paper entry blocked: {block_reason}"

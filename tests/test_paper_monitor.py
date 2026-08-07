@@ -193,6 +193,74 @@ def test_automatic_paper_entry_is_confirmed_persistent_and_duplicate_safe(tmp_pa
     assert restarted.set_auto_entry(False, "DISABLE AUTO PAPER").auto_entry_enabled is False
 
 
+def test_automatic_collection_can_fill_two_position_capacity(tmp_path) -> None:
+    settings = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+        }
+    )
+    application = build_application(settings)
+    connections = ConnectionManager(settings)
+    now = datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+
+    def proposal(symbol: str, token: str, signal_at: datetime) -> PaperTradeProposal:
+        instrument = Instrument(
+            symbol, token, "NFO", "NIFTY", "CE", 75, signal_at.date(), 24600
+        )
+        return PaperTradeProposal(
+            symbol,
+            instrument,
+            Quote(symbol, 100, signal_at),
+            96,
+            "BULLISH",
+            0.6,
+            "fixture",
+            340,
+            signal_at,
+            24600,
+            24610,
+            24590,
+            58,
+            20,
+        )
+
+    proposals = [
+        proposal("NIFTY_FIRST_CE", "123", now),
+        proposal("NIFTY_SECOND_CE", "456", now + timedelta(minutes=5)),
+    ]
+    connections.create_paper_proposal = lambda _now=None: proposals.pop(0)  # type: ignore[method-assign]
+    connections.quote_instrument = lambda instrument, observed_at=None: Quote(  # type: ignore[method-assign]
+        instrument.symbol, 101, observed_at or now
+    )
+    monitor = PaperPositionMonitor(application, connections)
+    monitor.set_auto_entry(True, "ENABLE AUTO PAPER")
+
+    connections._snapshot = replace(
+        connections.snapshot(),
+        signal_label="BULLISH",
+        latest_candle_at=now,
+        data_status="fresh",
+    )
+    monitor.run_cycle(now)
+    connections._snapshot = replace(
+        connections.snapshot(),
+        signal_label="BULLISH",
+        latest_candle_at=now + timedelta(minutes=5),
+        data_status="fresh",
+    )
+    second = monitor.run_cycle(now + timedelta(minutes=5))
+    connections._snapshot = replace(
+        connections.snapshot(),
+        latest_candle_at=now + timedelta(minutes=10),
+    )
+    full = monitor.run_cycle(now + timedelta(minutes=10))
+
+    assert len(application.ledger.open_positions()) == 2
+    assert "NIFTY_SECOND_CE" in second.auto_entry_last_action
+    assert "capacity 2/2" in full.auto_entry_last_action
+
+
 def test_daily_report_is_sent_once_and_survives_restart(tmp_path) -> None:
     settings = Settings.from_env(
         {

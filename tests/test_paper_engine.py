@@ -83,7 +83,7 @@ def test_stale_quote_is_rejected(tmp_path: Path) -> None:
 
 
 def test_lot_risk_and_position_limits_are_enforced(tmp_path: Path) -> None:
-    application = app(tmp_path)
+    application = app(tmp_path, MAX_OPEN_POSITIONS="1")
     now = market_time()
     with pytest.raises(RiskRejected, match="Lot limit"):
         application.paper_broker.buy(request(now, lots=2), now)
@@ -92,6 +92,50 @@ def test_lot_risk_and_position_limits_are_enforced(tmp_path: Path) -> None:
     application.paper_broker.buy(request(now), now)
     with pytest.raises(RiskRejected, match="Open-position"):
         application.paper_broker.buy(request(now, symbol="NIFTY_OTHER_CE"), now)
+
+
+def test_default_profile_allows_two_distinct_open_paper_positions(tmp_path: Path) -> None:
+    application = app(tmp_path)
+    now = market_time()
+
+    application.paper_broker.buy(request(now, symbol="NIFTY_FIRST_CE"), now)
+    application.paper_broker.buy(request(now, symbol="NIFTY_SECOND_CE"), now)
+
+    assert len(application.ledger.open_positions()) == 2
+    with pytest.raises(RiskRejected, match="Open-position"):
+        application.paper_broker.buy(request(now, symbol="NIFTY_THIRD_CE"), now)
+
+
+def test_zero_daily_trade_limit_allows_paper_collection_until_other_guard_fails(
+    tmp_path: Path,
+) -> None:
+    application = app(tmp_path, MAX_TRADES_PER_DAY="0")
+    now = market_time()
+    for index in range(5):
+        symbol = f"NIFTY_{index}_CE"
+        order_id = application.paper_broker.buy(request(now, symbol=symbol), now)
+        application.paper_broker.close(
+            order_id,
+            Quote(symbol, 101, now + timedelta(seconds=1)),
+            now + timedelta(seconds=2),
+            "collection-test",
+        )
+
+    assert application.ledger.trades_on("2026-08-03") == 5
+
+
+def test_capital_summary_reports_open_premium_used_and_available(tmp_path: Path) -> None:
+    application = app(tmp_path)
+    now = market_time()
+    application.paper_broker.buy(request(now), now)
+
+    summary = application.ledger.capital_summary()
+
+    assert summary["premium_committed"] == 5012.5
+    assert summary["open_entry_fees"] == 20
+    assert summary["capital_used"] == 5032.5
+    assert summary["capital_available"] == 94967.5
+    assert summary["open_positions"] == 1
 
 
 def test_risk_includes_adverse_fill_and_both_order_fees(tmp_path: Path) -> None:

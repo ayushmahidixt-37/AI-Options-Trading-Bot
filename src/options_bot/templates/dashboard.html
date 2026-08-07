@@ -130,7 +130,7 @@
       });
     });
     function refreshDashboard() { location.replace(`/${location.hash}`); }
-    {% if connections.angel_status == 'connected' %}window.setTimeout(refreshDashboard, 15000);{% endif %}
+    window.setTimeout(refreshDashboard, 15000);
   </script>
 </body>
 </html>

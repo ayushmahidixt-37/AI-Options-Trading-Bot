@@ -48,7 +48,10 @@ class RiskEngine:
         if any(row["symbol"] == request.instrument.symbol for row in positions):
             raise RiskRejected("Duplicate open symbol")
         trading_date = self.clock.trading_date(now)
-        if self.ledger.trades_on(trading_date) >= self.settings.max_trades_per_day:
+        if (
+            self.settings.max_trades_per_day > 0
+            and self.ledger.trades_on(trading_date) >= self.settings.max_trades_per_day
+        ):
             raise RiskRejected("Daily trade limit reached")
         account = self.ledger.account()
         if self.ledger.realized_pnl_on(trading_date) <= -self.settings.max_daily_net_loss:

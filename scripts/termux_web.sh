@@ -77,6 +77,8 @@ text = path.read_text(encoding="utf-8")
 text = text.replace("/var/lib/ai-options-bot", str(data_dir))
 text = text.replace("/etc/ai-options-bot/credentials.env", str(credentials_file))
 text = text.replace(str(Path.cwd() / "credentials.env.example"), str(credentials_file))
+text = text.replace("MAX_OPEN_POSITIONS=1", "MAX_OPEN_POSITIONS=2")
+text = text.replace("MAX_TRADES_PER_DAY=3", "MAX_TRADES_PER_DAY=0")
 path.write_text(text, encoding="utf-8")
 PY
 mkdir -p "${DATA_DIR}"

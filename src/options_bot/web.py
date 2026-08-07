@@ -80,6 +80,14 @@ def create_web_app(
         snapshot = status_snapshot(application)
         report = healthcheck(settings, application.ledger)
         now = datetime.now(settings.timezone)
+        monitor_snapshot = paper_monitor.snapshot()
+        paper_capital = application.ledger.capital_summary()
+        paper_capital["estimated_equity"] = round(
+            float(snapshot["account"]["starting_capital"])
+            + float(snapshot["account"]["realized_pnl"])
+            + monitor_snapshot.total_unrealized_pnl,
+            2,
+        )
         readiness = build_readiness_report(
             settings,
             application.ledger,
@@ -97,7 +105,8 @@ def create_web_app(
             "connections": connections.snapshot(),
             "backtest": latest_backtest,
             "proposal": latest_proposal,
-            "paper_monitor": paper_monitor.snapshot(),
+            "paper_monitor": monitor_snapshot,
+            "paper_capital": paper_capital,
             "daily_summary": application.ledger.daily_summary(
                 application.clock.trading_date(now)
             ),
