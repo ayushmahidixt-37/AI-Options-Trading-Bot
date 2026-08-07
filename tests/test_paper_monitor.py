@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from options_bot.config import Settings
@@ -191,3 +191,30 @@ def test_automatic_paper_entry_is_confirmed_persistent_and_duplicate_safe(tmp_pa
     restarted = PaperPositionMonitor(application, connections)
     assert restarted.snapshot().auto_entry_enabled is True
     assert restarted.set_auto_entry(False, "DISABLE AUTO PAPER").auto_entry_enabled is False
+
+
+def test_daily_report_is_sent_once_and_survives_restart(tmp_path) -> None:
+    settings = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+        }
+    )
+    application = build_application(settings)
+    connections = ConnectionManager(settings)
+    messages: list[str] = []
+    def capture(message: str) -> bool:
+        messages.append(message)
+        return True
+
+    connections.send_alert = capture  # type: ignore[method-assign]
+    now = datetime(2026, 8, 7, 15, 21, tzinfo=IST)
+
+    PaperPositionMonitor(application, connections).run_cycle(now)
+    restarted = PaperPositionMonitor(application, connections)
+    restarted.run_cycle(now + timedelta(minutes=1))
+
+    assert len(messages) == 1
+    assert "Paper daily report" in messages[0]
+    assert "Database integrity" in messages[0]
+    assert restarted.snapshot().last_daily_report_at == now

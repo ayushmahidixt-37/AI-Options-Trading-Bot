@@ -25,6 +25,7 @@ class PaperMonitorSnapshot:
     position_quotes: tuple[dict[str, object], ...] = ()
     auto_entry_enabled: bool = False
     auto_entry_last_action: str = "Automatic paper entries are disabled."
+    last_daily_report_at: datetime | None = None
 
 
 class PaperPositionMonitor:
@@ -46,6 +47,11 @@ class PaperPositionMonitor:
                 "Automatic paper entries restored as enabled after restart."
                 if self._auto_entry_enabled
                 else self._snapshot.auto_entry_last_action
+            ),
+            last_daily_report_at=(
+                datetime.fromisoformat(last_report)
+                if (last_report := self.application.ledger.get_state("last_daily_report_at"))
+                else None
             ),
         )
 
@@ -160,7 +166,9 @@ class PaperPositionMonitor:
                     errors.append(f"{instrument.symbol}: Telegram exit alert failed")
             except (ConnectionActionError, RuntimeError, ValueError) as exc:
                 errors.append(f"{instrument.symbol}: {exc}")
+        self.connections.record_paper_cycle(now)
         auto_action = self._maybe_auto_entry(now)
+        report_at = self._maybe_daily_report(now)
         with self._lock:
             self._snapshot = replace(
                 self._snapshot,
@@ -181,6 +189,7 @@ class PaperPositionMonitor:
                 position_quotes=tuple(position_quotes),
                 auto_entry_enabled=self._auto_entry_enabled,
                 auto_entry_last_action=auto_action or self._snapshot.auto_entry_last_action,
+                last_daily_report_at=report_at or self._snapshot.last_daily_report_at,
             )
             self._first_cycle = False
             return self._snapshot
@@ -188,6 +197,9 @@ class PaperPositionMonitor:
     def _maybe_auto_entry(self, now: datetime) -> str | None:
         if not self._auto_entry_enabled or self.application.ledger.open_positions():
             return None
+        block_reason = self.connections.entry_block_reason(now)
+        if block_reason:
+            return f"Automatic paper entry blocked: {block_reason}"
         connection = self.connections.snapshot()
         signal_at = connection.latest_candle_at
         if connection.signal_label not in {"BULLISH", "BEARISH"} or signal_at is None:
@@ -230,6 +242,47 @@ class PaperPositionMonitor:
                 now.isoformat(), "INFO", "auto_paper_rejected", detail
             )
             return detail
+
+    def _maybe_daily_report(self, now: datetime) -> datetime | None:
+        if now.time() < self.application.settings.force_exit:
+            return None
+        trading_date = self.application.clock.trading_date(now)
+        if self.application.ledger.get_state("last_daily_report_date") == trading_date:
+            return None
+        self.application.ledger.set_state("last_daily_report_date", trading_date)
+        self.application.ledger.set_state("last_daily_report_at", now.isoformat())
+        summary = self.application.ledger.daily_summary(trading_date)
+        connection = self.connections.snapshot()
+        message = (
+            f"Paper daily report · {trading_date}\n"
+            f"Trades {summary['trades']} · Wins {summary['wins']} · "
+            f"Losses {summary['losses']}\n"
+            f"Net P&L {float(summary['net_pnl']):.2f} · "
+            f"Fees {float(summary['fees']):.2f}\n"
+            f"Open positions {summary['open_positions']} · "
+            f"Archive gaps {connection.archive_gaps}\n"
+            f"Reconnects {connection.reconnect_count} · "
+            f"Monitor failures {connection.consecutive_failures}\n"
+            f"Database integrity {connection.archive_integrity}. Paper mode only."
+        )
+        try:
+            sent = self.connections.send_alert(message)
+            self.application.ledger.record_event(
+                now.isoformat(),
+                "INFO" if sent else "WARNING",
+                "daily_report" if sent else "daily_report_skipped",
+                "Telegram daily report sent"
+                if sent
+                else "Telegram credentials unavailable; daily report not sent",
+            )
+        except Exception:
+            self.application.ledger.record_event(
+                now.isoformat(),
+                "WARNING",
+                "daily_report_failed",
+                "Telegram daily report failed; duplicate send suppressed",
+            )
+        return now
 
     def close_all(
         self, confirmation: str, observed_at: datetime | None = None

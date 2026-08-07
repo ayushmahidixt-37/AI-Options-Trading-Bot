@@ -423,6 +423,7 @@ def test_creates_read_only_atm_paper_proposal_with_bounded_risk(tmp_path: Path) 
         signal_confidence=0.57,
         signal_reason="fixture",
         data_status="fresh",
+        latest_candle_at=now - timedelta(minutes=5),
     )
 
     proposal = manager.create_paper_proposal(now)
@@ -483,3 +484,43 @@ def test_sends_alert_only_telegram_message(tmp_path: Path) -> None:
     assert messages == [
         "AI Options Trading Bot: Telegram alerts connected. Paper mode only; no trade was placed."
     ]
+
+
+def test_operational_failures_alert_once_and_recovery_is_persisted(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+    messages: list[str] = []
+
+    class FakeNotifier:
+        def send(self, text: str) -> None:
+            messages.append(text)
+
+    config = settings(tmp_path, credentials)
+    manager = ConnectionManager(
+        config, notifier_factory=lambda _token, _chat: FakeNotifier()
+    )
+    start = datetime(2026, 8, 7, 10, 0, tzinfo=IST)
+
+    for offset in range(4):
+        manager._record_operational_failure(  # noqa: SLF001
+            start + timedelta(seconds=offset), "fixture outage"
+        )
+    manager._record_operational_success(start + timedelta(minutes=1))  # noqa: SLF001
+
+    assert len([item for item in messages if "Monitor warning" in item]) == 1
+    assert len([item for item in messages if "recovered" in item]) == 1
+    restarted = ConnectionManager(config)
+    assert restarted.snapshot().consecutive_failures == 0
+    assert restarted.snapshot().last_recovery_at == start + timedelta(minutes=1)
+
+
+def test_entry_safety_lock_rejects_stale_market_data(tmp_path: Path) -> None:
+    credentials = credential_file(tmp_path)
+    manager = ConnectionManager(settings(tmp_path, credentials))
+    now = datetime(2026, 8, 7, 10, 30, tzinfo=IST)
+    manager._snapshot = replace(  # noqa: SLF001
+        manager.snapshot(),
+        data_status="fresh",
+        latest_candle_at=now - timedelta(minutes=15),
+    )
+
+    assert "stale" in str(manager.entry_block_reason(now)).lower()

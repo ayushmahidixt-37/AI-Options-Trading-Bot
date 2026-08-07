@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 import logging
 import json
+import shutil
 import time as clock
 import uuid
 from dataclasses import dataclass, replace
@@ -103,6 +104,13 @@ class ConnectionSnapshot:
     reconnect_count: int = 0
     last_login_at: datetime | None = None
     catchup_status: str = "not run"
+    consecutive_failures: int = 0
+    last_successful_angel_at: datetime | None = None
+    last_archive_write_at: datetime | None = None
+    last_paper_cycle_at: datetime | None = None
+    free_storage_mb: int = 0
+    entry_lock_reason: str | None = None
+    last_recovery_at: datetime | None = None
 
 
 def _smart_api_factory(api_key: str) -> object:
@@ -245,7 +253,12 @@ class ConnectionManager:
         self._last_catchup_date = None
         self._paper_cycle: Callable[[datetime], object] | None = None
         self._reconnect_count = 0
+        state = self.archive.operational_state()
+        self._consecutive_failures = int(
+            state.get("consecutive_failures", {}).get("value", "0")
+        )
         self._refresh_archive_snapshot()
+        self._restore_operational_snapshot(state)
 
     def snapshot(self) -> ConnectionSnapshot:
         with self._lock:
@@ -254,6 +267,62 @@ class ConnectionManager:
     def register_paper_cycle(self, callback: Callable[[datetime], object]) -> None:
         """Attach an exit-only paper monitor to the existing background worker."""
         self._paper_cycle = callback
+
+    def _restore_operational_snapshot(
+        self, state: dict[str, dict[str, str]]
+    ) -> None:
+        def timestamp(key: str) -> datetime | None:
+            raw = state.get(key, {}).get("value")
+            return datetime.fromisoformat(raw) if raw else None
+
+        with self._lock:
+            self._snapshot = replace(
+                self._snapshot,
+                consecutive_failures=self._consecutive_failures,
+                monitor_last_run_at=timestamp("monitor_heartbeat"),
+                last_successful_angel_at=timestamp("last_successful_angel"),
+                last_archive_write_at=timestamp("last_archive_write"),
+                last_paper_cycle_at=timestamp("last_paper_cycle"),
+                last_recovery_at=timestamp("last_recovery"),
+            )
+
+    def record_paper_cycle(self, observed_at: datetime) -> None:
+        self.archive.set_operational_state("last_paper_cycle", observed_at.isoformat(), observed_at)
+        with self._lock:
+            self._snapshot = replace(self._snapshot, last_paper_cycle_at=observed_at)
+
+    def _record_archive_write(self, observed_at: datetime) -> None:
+        self.archive.set_operational_state(
+            "last_archive_write", observed_at.isoformat(), observed_at
+        )
+        with self._lock:
+            self._snapshot = replace(
+                self._snapshot, last_archive_write_at=observed_at
+            )
+
+    def entry_block_reason(self, observed_at: datetime | None = None) -> str | None:
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        free_mb = int(shutil.disk_usage(self._settings.data_dir).free / 1_048_576)
+        reason: str | None = None
+        with self._lock:
+            latest = self._snapshot.latest_candle_at
+            data_status = self._snapshot.data_status
+        if free_mb < self._settings.minimum_free_storage_mb:
+            reason = (
+                f"Storage safety lock: {free_mb} MB free; "
+                f"minimum is {self._settings.minimum_free_storage_mb} MB"
+            )
+        elif data_status != "fresh" or latest is None:
+            reason = "Market-data safety lock: a fresh closed candle is required"
+        elif now - latest > timedelta(minutes=10):
+            reason = "Market-data safety lock: latest closed candle is stale"
+        with self._lock:
+            self._snapshot = replace(
+                self._snapshot, free_storage_mb=free_mb, entry_lock_reason=reason
+            )
+        return reason
 
     def _refresh_archive_snapshot(self) -> None:
         stats = self.archive.stats()
@@ -300,6 +369,7 @@ class ConnectionManager:
             ]
             saved = self.archive.save_instruments(instruments, now)
             self.archive.record_run(now, "success", 0, saved, "NIFTY instruments archived")
+            self._record_archive_write(now)
             self._last_instrument_refresh_date = now.date()
             self._refresh_archive_snapshot()
         except Exception as exc:
@@ -372,6 +442,8 @@ class ConnectionManager:
         status = "success" if not failures else "partial"
         detail = "; ".join(failures[:3]) or "ATM ±5 option candles archived"
         self.archive.record_run(now, status, saved, 0, detail)
+        if saved:
+            self._record_archive_write(now)
         with self._lock:
             self._last_option_archive_bucket = bucket
             self._snapshot = replace(
@@ -390,6 +462,9 @@ class ConnectionManager:
         now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
             self._settings.timezone
         )
+        block_reason = self.entry_block_reason(now)
+        if block_reason:
+            raise ConnectionActionError(block_reason)
         with self._lock:
             smart_api = self._smart_api
             spot = self._snapshot.nifty_price
@@ -532,6 +607,8 @@ class ConnectionManager:
                 )
                 cursor = window_end + timedelta(minutes=5)
             self.archive.record_run(now, "success", saved, 0, "NIFTY catch-up complete")
+            if saved:
+                self._record_archive_write(now)
             self._last_catchup_date = now.date()
             self._refresh_archive_snapshot()
             with self._lock:
@@ -612,37 +689,93 @@ class ConnectionManager:
                 / f"market-data-{now.strftime('%Y%m%d')}.sqlite3"
             )
             self.archive.backup(target)
+            self.archive.rotate_backups(
+                self._settings.data_dir / "backups",
+                self._settings.backup_retention_count,
+            )
             self._last_backup_date = now.date()
+        self._record_operational_success(now)
+        lock_reason = self.entry_block_reason(now)
         with self._lock:
             self._snapshot = replace(
                 self._snapshot,
                 monitor_status="running",
                 monitor_last_run_at=now,
                 monitor_error=None,
+                entry_lock_reason=lock_reason,
             )
             return self._snapshot
+
+    def _record_operational_success(self, now: datetime) -> None:
+        previous = self._consecutive_failures
+        self._consecutive_failures = 0
+        self.archive.set_operational_state("monitor_heartbeat", now.isoformat(), now)
+        self.archive.set_operational_state("last_successful_angel", now.isoformat(), now)
+        self.archive.set_operational_state("consecutive_failures", 0, now)
+        recovered = previous >= self._settings.monitor_failure_alert_threshold
+        if recovered:
+            self.archive.set_operational_state("last_recovery", now.isoformat(), now)
+            try:
+                self.send_alert(
+                    f"Monitor recovered after {previous} consecutive failures. "
+                    "Paper mode remains active."
+                )
+            except Exception:
+                pass
+        with self._lock:
+            self._snapshot = replace(
+                self._snapshot,
+                consecutive_failures=0,
+                last_successful_angel_at=now,
+                last_recovery_at=now if recovered else self._snapshot.last_recovery_at,
+            )
+
+    def _record_operational_failure(self, now: datetime, detail: str) -> None:
+        self._consecutive_failures += 1
+        self.archive.set_operational_state("monitor_heartbeat", now.isoformat(), now)
+        self.archive.set_operational_state(
+            "consecutive_failures", self._consecutive_failures, now
+        )
+        if self._consecutive_failures == self._settings.monitor_failure_alert_threshold:
+            try:
+                self.send_alert(
+                    f"Monitor warning: {self._consecutive_failures} consecutive failures. "
+                    f"{detail}. Automatic paper entries remain safety-gated."
+                )
+            except Exception:
+                pass
+        with self._lock:
+            self._snapshot = replace(
+                self._snapshot,
+                consecutive_failures=self._consecutive_failures,
+                monitor_last_run_at=now,
+            )
 
     def _monitor_loop(self, interval_seconds: float) -> None:
         while not self._monitor_stop.is_set():
             now = datetime.now(self._settings.timezone)
             try:
                 self.run_background_cycle(now)
-            except (ConnectionActionError, FileNotFoundError, ValueError) as exc:
+            except Exception as exc:
+                detail = _safe_detail(str(exc), ())
+                self._record_operational_failure(now, detail)
                 with self._lock:
                     self._snapshot = replace(
                         self._snapshot,
                         monitor_status="retrying",
-                        monitor_error=_safe_detail(str(exc), ()),
+                        monitor_error=detail,
                     )
             finally:
                 if self._paper_cycle is not None:
                     try:
                         self._paper_cycle(now)
                     except Exception as exc:
+                        detail = f"Paper cycle failed: {_safe_detail(str(exc), ())}"
+                        self._record_operational_failure(now, detail)
                         with self._lock:
                             self._snapshot = replace(
                                 self._snapshot,
-                                monitor_error=f"Paper exit monitor failed: {_safe_detail(str(exc), ())}",
+                                monitor_error=detail,
                             )
             self._monitor_stop.wait(interval_seconds)
 
@@ -811,6 +944,7 @@ class ConnectionManager:
                 spot = self._snapshot.nifty_price
             self.archive.save_observation(now, {**snapshot, "spot": spot})
             self.archive.record_run(now, "success", saved, 0, "NIFTY candles archived")
+            self._record_archive_write(now)
             self._refresh_archive_snapshot()
         except Exception as exc:
             detail = _safe_detail(f"{type(exc).__name__}: {exc}", secrets)
@@ -827,7 +961,9 @@ class ConnectionManager:
             self._last_intelligence_bucket = now.replace(
                 minute=now.minute - now.minute % 5, second=0, microsecond=0
             )
-            self._snapshot = replace(self._snapshot, **snapshot)
+            self._snapshot = replace(
+                self._snapshot, last_archive_write_at=now, **snapshot
+            )
             result = self._snapshot
         self._send_signal_change_alert(result, credentials)
         return result
@@ -954,13 +1090,15 @@ class ConnectionManager:
             )
             return self._snapshot
 
-    def send_alert(self, text: str) -> None:
+    def send_alert(self, text: str) -> bool:
         """Send an operator alert without accepting Telegram commands."""
         try:
             credentials = load_credentials(self._settings.credentials_path)
         except FileNotFoundError:
-            return
+            return False
         token = credentials.get("TELEGRAM_BOT_TOKEN", "").strip()
         chat_id = credentials.get("TELEGRAM_CHAT_ID", "").strip()
         if token and chat_id:
             self._notifier_factory(token, chat_id).send(text)
+            return True
+        return False

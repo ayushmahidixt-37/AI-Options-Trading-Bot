@@ -101,6 +101,9 @@ class Settings:
     entry_cutoff: time
     force_exit: time
     nse_holidays: frozenset[date]
+    monitor_failure_alert_threshold: int
+    minimum_free_storage_mb: int
+    backup_retention_count: int
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -132,6 +135,15 @@ class Settings:
             entry_cutoff=_clock(values.get("ENTRY_CUTOFF_IST", "15:00"), "ENTRY_CUTOFF_IST"),
             force_exit=_clock(values.get("FORCE_EXIT_IST", "15:20"), "FORCE_EXIT_IST"),
             nse_holidays=_dates(values.get("NSE_HOLIDAYS", ""), "NSE_HOLIDAYS"),
+            monitor_failure_alert_threshold=_integer(
+                values, "MONITOR_FAILURE_ALERT_THRESHOLD", 3, 1
+            ),
+            minimum_free_storage_mb=_integer(
+                values, "MINIMUM_FREE_STORAGE_MB", 250, 1
+            ),
+            backup_retention_count=_integer(
+                values, "BACKUP_RETENTION_COUNT", 14, 1
+            ),
         )
         settings.validate()
         return settings

@@ -1,8 +1,12 @@
 # AI Options Trading Bot
 
-Server-ready foundations for an options bot that is deliberately limited to
-**paper trading**. Angel One market-data support is the next milestone; this
-release contains no reachable broker order-submission implementation.
+> **Session handoff:** Read [`PROJECT_STATUS.md`](PROJECT_STATUS.md) first for
+> the current implementation, safety boundary, validation plan, and next phase.
+
+Tablet-friendly foundations for an options bot deliberately limited to
+**paper trading**, with Angel One read-only market data, durable archives,
+backtesting, and guarded simulated entries. This release contains no reachable
+broker order-submission implementation.
 
 > Automated trading cannot guarantee profits or passive income. Keep the bot in
 > paper mode until its data, strategy, risk controls, and operations have been
@@ -186,6 +190,25 @@ Set `NSE_HOLIDAYS` in `local-bot.env` to the official comma-separated `YYYY-MM-D
 
 Archived backtests support optional start/end dates, conservative historical stop handling (opening gaps use the candle open; intrabar stop touches use the stop), configured force exit, lot size, fees, and slippage. Detailed rows show contract, entry, stop, exit, reason, and net P&L, and can be downloaded as CSV. These reports remain simulations and should be considered preliminary until multiple complete sessions with low gap counts have been collected.
 
+### Operational hardening and daily report
+
+The Data & Operations workspace shows persistent monitor heartbeat, last Angel success, last archive write, last paper cycle, consecutive failures, free storage, and any stale-data/storage entry lock. Telegram sends one warning when the configured consecutive-failure threshold is reached and one recovery message after service returns. After force-exit time, the paper monitor sends one daily summary per trading date. Automatic backups are rotated according to `BACKUP_RETENTION_COUNT`.
+
+For optional startup after an Android reboot, install **Termux:Boot** from the same source as Termux, open it once, and create `~/.termux/boot/start-options-bot` containing:
+
+```bash
+#!/data/data/com.termux/files/usr/bin/bash
+termux-wake-lock
+cd "$HOME/AI-Options-Trading-Bot"
+scripts/termux_web.sh >> "$HOME/options-bot-startup.log" 2>&1
+```
+
+Then run `chmod 700 ~/.termux/boot/start-options-bot`. Automatic Android startup does not remove the need to disable battery optimization, monitor the dashboard, and keep the system in paper mode.
+
+### Strategy validation workspace
+
+The Research workspace compares documented variants over three required chronological, non-overlapping ranges. Development and validation results are visible for every variant; one candidate is selected using validation results and evaluated once against the untouched test range. Other variants never see test results. Comparison CSV exports include trades, net P&L, and drawdown. Gaps or missing option history keep the report preliminary.
+
 ## Functional modules
 
 ```text
@@ -201,6 +224,7 @@ risk.py                    centralized paper pre-trade checks
 paper_broker.py            conservative simulated fills
 ledger.py                  transactional SQLite state
 backtest.py                chronological, no-same-bar-look-ahead replay
+validation.py              split-safe offline strategy comparison workspace
 reporting.py               paper-account reports
 notifications.py           alert-only Telegram sender
 actions.py                 UI-safe paper action helpers

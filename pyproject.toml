@@ -32,6 +32,9 @@ options-bot = "options_bot.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+options_bot = ["templates/*.html", "templates/partials/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

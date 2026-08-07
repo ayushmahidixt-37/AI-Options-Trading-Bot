@@ -1,0 +1,18 @@
+<section id="overview" class="panel active" aria-labelledby="overview-title">
+      <div class="page-heading"><div><h2 id="overview-title">Today at a glance</h2><p>Current market state, signal readiness and the paper account—without operational noise.</p></div><form method="post" action="/actions/intelligence-refresh#overview"><button class="btn" type="submit">Refresh analysis</button></form></div>
+      <div class="grid">
+        <article class="card span-3"><div class="label">NIFTY spot</div><div class="metric">{{ '%.2f'|format(connections.nifty_price) if connections.nifty_price else '—' }}</div><span class="badge {{ 'good' if connections.angel_status == 'connected' else 'warn' }}"><span class="dot"></span>{{ connections.angel_status }}</span></article>
+        <article class="card span-3"><div class="label">Five-minute signal</div><div class="metric">{{ connections.signal_label }}</div><span class="badge {{ 'good' if connections.data_status == 'fresh' else 'warn' }}">{{ connections.data_status }}</span></article>
+        <article class="card span-3"><div class="label">Open paper P&amp;L</div><div class="metric">{{ '%.2f'|format(paper_monitor.total_unrealized_pnl) }}</div><span class="badge neutral">{{ positions|length }} open position(s)</span></article>
+        <article class="card span-3"><div class="label">Operational health</div><div class="metric">{{ 'Healthy' if health.ok and connections.consecutive_failures == 0 else 'Review' }}</div><span class="badge {{ 'good' if health.ok and connections.consecutive_failures == 0 else 'bad' }}">{{ connections.consecutive_failures }} failures</span></article>
+        <article class="card span-8">
+          <h2>NIFTY five-minute market intelligence</h2><p class="muted">Read-only analysis from closed Angel One candles. This section cannot place an order.</p>
+          <div class="grid">
+            <div class="span-4"><div class="label">Read-only signal</div><p class="metric">{{ connections.signal_label }}</p><p>{{ connections.signal_reason }}</p></div>
+            <div class="span-4"><dl class="kv"><dt>EMA 9</dt><dd>{{ '%.2f'|format(connections.ema_fast) if connections.ema_fast is not none else '—' }}</dd><dt>EMA 21</dt><dd>{{ '%.2f'|format(connections.ema_slow) if connections.ema_slow is not none else '—' }}</dd><dt>RSI 14</dt><dd>{{ '%.2f'|format(connections.rsi_value) if connections.rsi_value is not none else '—' }}</dd><dt>ATR 14</dt><dd>{{ '%.2f'|format(connections.atr_value) if connections.atr_value is not none else '—' }}</dd></dl></div>
+            <div class="span-4"><dl class="kv"><dt>Session</dt><dd>{{ connections.market_status }}</dd><dt>Candles</dt><dd>{{ connections.candle_count }}</dd><dt>Latest close</dt><dd>{{ connections.latest_candle_at.strftime('%H:%M %Z') if connections.latest_candle_at else '—' }}</dd><dt>Confidence</dt><dd>{{ '%.0f%%'|format(connections.signal_confidence * 100) if connections.signal_confidence is not none else '—' }}</dd></dl></div>
+          </div>
+        </article>
+        <article class="card span-4"><h2>Paper Account</h2><dl class="kv"><dt>Starting capital</dt><dd>{{ '%.2f'|format(account.starting_capital) }}</dd><dt>Realized P&amp;L</dt><dd>{{ '%.2f'|format(account.realized_pnl) }}</dd><dt>Fees paid</dt><dd>{{ '%.2f'|format(account.fees_paid) }}</dd><dt>Automatic entries</dt><dd>{{ 'ENABLED' if paper_monitor.auto_entry_enabled else 'DISABLED' }}</dd></dl><hr class="divider"><div class="stack"><form method="post" action="/actions/healthcheck#overview"><button class="btn ghost" type="submit">Run healthcheck</button></form><form method="post" action="/actions/paper-scan#overview"><button class="btn ghost" type="submit">Run paper scan</button></form></div></article>
+      </div>
+    </section>
