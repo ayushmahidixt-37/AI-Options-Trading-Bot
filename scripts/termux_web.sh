@@ -20,7 +20,15 @@ if [[ ! -d ${APP_DIR}/.git ]]; then
 fi
 
 cd "${APP_DIR}"
-git pull --ff-only || true
+if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
+  echo "Tracked application files have local changes; refusing to overwrite them." >&2
+  echo "Run 'git status' and preserve or discard those changes before restarting." >&2
+  exit 2
+fi
+git fetch origin main
+git checkout main
+git merge --ff-only origin/main
+echo "Running repository version: $(git rev-parse --short HEAD)"
 
 mkdir -p "${DATA_DIR}"
 if [[ -z ${OPTIONS_BOT_WEB_PASSWORD:-} ]]; then
