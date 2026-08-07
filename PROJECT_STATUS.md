@@ -114,6 +114,18 @@ paper results are simulations and may not represent future results.
 - A candidate is selected from validation data; only that candidate is evaluated
   on the untouched test range, with CSV comparison export.
 
+### Strategy research backlog — not active
+
+The professional strategy assessment is a research roadmap, not active forward
+paper logic. After the current baseline has enough complete evidence, evaluate
+fresh EMA crossover/separation and slope, trend pullbacks, opening-range
+breakouts, VWAP/ADX confirmation, normalized ATR regimes, and minimum sample
+requirements. Bid/ask liquidity, volume/open interest, implied volatility,
+Greeks, calibrated confidence, and debit spreads require additional reliable
+option-chain fields and conservative multi-leg cost modelling before they can be
+implemented. Do not activate these ideas together or select them from the same
+period used for final testing.
+
 ### Paper-readiness review gate
 
 - Evidence checklist for archive coverage/gaps/integrity, paper-trade count and
@@ -247,6 +259,8 @@ At the end of every development session, update this file when applicable:
   strategy validation workspace are complete.
 - The paper-readiness evidence gate and CSV review export are complete; live
   trading remains unapproved and unreachable.
+- The strategy assessment backlog is documented but intentionally not active;
+  the EMA/RSI ATM-option baseline remains the forward-paper strategy.
 - The most valuable next activity is collecting complete forward paper sessions,
   preserving the SQLite archive, and reviewing Phase B only when every split has
   adequate low-gap option history.
