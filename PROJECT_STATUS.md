@@ -28,8 +28,8 @@ paper results are simulations and may not represent future results.
 - The currently reachable Angel integration is market-data only.
 - Telegram is outbound-only; it does not accept trading commands.
 - Automatic entries create paper-ledger rows only and are disabled by default.
-- Enabling automatic paper entries requires the exact text
-  `ENABLE AUTO PAPER`; disabling requires `DISABLE AUTO PAPER`.
+- Enabling automatic paper entries requires an explicit toggle confirmation;
+  disabling the toggle prevents new entries while preserving exit monitoring.
 - Never add a live-order call as an incidental part of another phase.
 - Never commit or print Angel, Telegram, password, PIN, or TOTP secrets.
 
@@ -66,6 +66,10 @@ paper results are simulations and may not represent future results.
 
 - Two-step manually confirmed one-lot paper proposals.
 - Optional automatic paper-only entries, explicitly enabled and persisted.
+- The automation toggle starts a paper-monitor cycle immediately; periodic page
+  refreshes always return to the GET dashboard instead of reloading POST routes.
+- Browser refreshes and history navigation that revisit any `/actions/...` URL
+  are redirected to the matching dashboard workspace instead of returning 405.
 - One attempt per closed signal candle prevents restart duplicates.
 - Central checks for entry time, quote freshness, lots, maximum trade loss,
   open positions, duplicate symbols, daily trades, daily loss, and capital.
@@ -91,6 +95,8 @@ paper results are simulations and may not represent future results.
 - Automatic archive backup rotation using the configured retention count.
 - Termux startup now fails clearly on tracked local changes and requires a
   fast-forward to the latest `origin/main`, preventing silent use of old code.
+- CI pins Ruff below the next breaking rule expansion so local and GitHub lint
+  checks evaluate the same documented rule set.
 
 ### Strategy validation workspace
 
@@ -99,6 +105,16 @@ paper results are simulations and may not represent future results.
   target, and trailing-stop variants without changing forward-paper settings.
 - A candidate is selected from validation data; only that candidate is evaluated
   on the untouched test range, with CSV comparison export.
+
+### Paper-readiness review gate
+
+- Evidence checklist for archive coverage/gaps/integrity, paper-trade count and
+  drawdown, force exits, heartbeat/failures, backups, credential permissions,
+  dashboard password, and the paper-only boundary.
+- Persisted manual acknowledgements for broker restrictions, recovery drills,
+  and operator acceptance, plus a downloadable review CSV.
+- A completed review explicitly records `live_trading_approved=false`; it never
+  changes configuration or exposes broker order submission.
 
 ## Important local files
 
@@ -165,7 +181,7 @@ Before adding another trading feature, collect forward paper evidence:
 Both phases are implemented. Results remain preliminary until the archive has
 enough complete, low-gap sessions in every split.
 
-## Next review phase
+## Completed review phase
 
 ### Phase C — review gate, not automatic live deployment
 
@@ -173,6 +189,10 @@ Only after extended forward-paper evidence, perform a documented readiness
 review covering reliability, drawdown, data quality, broker restrictions,
 security, operational recovery, and user acceptance. Live trading is not an
 approved phase and must require a separate explicit decision and design review.
+
+The evidence gate is implemented, but it will remain blocked until the tablet
+has collected the required forward-paper evidence and manual reviews. Passing
+the gate still does not approve or enable live trading.
 
 ## Known limitations and cautions
 
@@ -217,6 +237,8 @@ At the end of every development session, update this file when applicable:
 - Guarded automatic paper entries are complete and disabled by default.
 - Operational hardening, daily Telegram reporting, backup rotation, and the
   strategy validation workspace are complete.
+- The paper-readiness evidence gate and CSV review export are complete; live
+  trading remains unapproved and unreachable.
 - The most valuable next activity is collecting complete forward paper sessions,
   preserving the SQLite archive, and reviewing Phase B only when every split has
   adequate low-gap option history.

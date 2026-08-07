@@ -23,7 +23,7 @@ dependencies = [
 dev = [
     "httpx2>=2,<3",
     "pytest>=8,<10",
-    "ruff>=0.8,<1",
+    "ruff>=0.8,<0.16",
 ]
 
 [project.scripts]

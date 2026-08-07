@@ -33,6 +33,22 @@ def test_web_dashboard_requires_password(tmp_path: Path) -> None:
     assert response.status_code == 401
 
 
+def test_revisited_post_action_redirects_to_dashboard(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+
+    redirect = client.get(
+        "/actions/healthcheck#paper",
+        auth=auth(),
+        follow_redirects=False,
+    )
+
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == "/#overview"
+    recovered = client.get(redirect.headers["location"], auth=auth())
+    assert recovered.status_code == 200
+    assert "Today at a glance" in recovered.text
+
+
 def test_web_lifespan_starts_and_stops_background_monitor(tmp_path: Path) -> None:
     cfg = settings(tmp_path)
     connections = ConnectionManager(cfg)
@@ -58,7 +74,10 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
     assert "Run paper scan" in response.text
     assert "No open paper positions" in response.text
     assert "Automatic paper entries" in response.text
-    assert "DISABLED" in response.text
+    assert "OFF" in response.text
+    assert 'role="switch"' in response.text
+    assert "location.reload()" not in response.text
+    assert "location.replace(`/${location.hash}`)" in response.text
 
     rejected = client.post(
         "/actions/auto-paper",
@@ -72,8 +91,11 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
         auth=auth(),
     )
     assert "Automatic paper entries enabled" in enabled.text
+    assert "monitoring started immediately" in enabled.text
+    assert "RUNNING" in enabled.text
     assert "Research workspace" in enabled.text
     assert "Data &amp; operations" in enabled.text
+    assert "Readiness review" in enabled.text
 
 
 def test_strategy_validation_form_validates_ranges_and_exports(tmp_path: Path) -> None:
@@ -105,6 +127,32 @@ def test_strategy_validation_form_validates_ranges_and_exports(tmp_path: Path) -
     )
     assert "Strategy validation completed" in valid.text
     assert client.get("/validation/comparison.csv", auth=auth()).status_code == 200
+
+
+def test_readiness_review_is_persistent_and_never_approves_live(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+    rejected = client.post(
+        "/actions/readiness-review",
+        data={"confirmation": "wrong"},
+        auth=auth(),
+    )
+    assert "Type SAVE PAPER REVIEW exactly" in rejected.text
+
+    saved = client.post(
+        "/actions/readiness-review",
+        data={
+            "confirmation": "SAVE PAPER REVIEW",
+            "broker_restrictions": "true",
+            "recovery_drill": "true",
+            "user_acceptance": "true",
+        },
+        auth=auth(),
+    )
+    assert "Paper-readiness acknowledgements saved" in saved.text
+    assert "NOT APPROVED" in saved.text
+    report = client.get("/readiness/report.csv", auth=auth())
+    assert report.status_code == 200
+    assert "live_trading_approved,false" in report.text
 
 
 def test_web_health_and_scan_actions_are_safe(tmp_path: Path) -> None:

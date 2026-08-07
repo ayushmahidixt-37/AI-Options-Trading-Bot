@@ -21,6 +21,11 @@ from .health import healthcheck
 from .paper_monitor import PaperPositionMonitor
 from .risk import RiskRejected
 from .validation import ValidationReport, export_validation_csv, run_strategy_validation
+from .readiness import (
+    build_readiness_report,
+    export_readiness_csv,
+    save_manual_review,
+)
 
 security = HTTPBasic()
 TEMPLATE_DIR = Path(__file__).with_name("templates")
@@ -75,6 +80,14 @@ def create_web_app(
         snapshot = status_snapshot(application)
         report = healthcheck(settings, application.ledger)
         now = datetime.now(settings.timezone)
+        readiness = build_readiness_report(
+            settings,
+            application.ledger,
+            connections.archive,
+            connections.snapshot(),
+            web_password=password,
+            observed_at=now,
+        )
         return {
             "request": request,
             "settings": settings,
@@ -107,6 +120,7 @@ def create_web_app(
             ),
             "trade_journal": application.ledger.trade_journal(25),
             "validation": latest_validation,
+            "readiness": readiness,
             "message": message,
             "ok": ok,
         }
@@ -114,6 +128,32 @@ def create_web_app(
     @app.get("/", response_class=HTMLResponse)
     def dashboard(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
         return templates.TemplateResponse(request=request, name="dashboard.html", context=dashboard_context(request))
+
+    @app.get("/actions/{action_name}", include_in_schema=False)
+    def redirect_revisited_action(
+        action_name: str,
+        _user: str = Depends(require_login),
+    ) -> RedirectResponse:
+        """Recover when a browser refreshes or revisits a POST-only action URL."""
+        panel = {
+            "healthcheck": "overview",
+            "paper-scan": "overview",
+            "intelligence-refresh": "overview",
+            "paper-proposal": "paper",
+            "paper-confirm": "paper",
+            "paper-close-all": "paper",
+            "auto-paper": "paper",
+            "backtest": "research",
+            "strategy-validation": "research",
+            "angel-connect": "operations",
+            "nifty-refresh": "operations",
+            "instruments-refresh": "operations",
+            "archive-backup": "operations",
+            "archive-verify": "operations",
+            "telegram-test": "operations",
+            "readiness-review": "readiness",
+        }.get(action_name, "overview")
+        return RedirectResponse(url=f"/#{panel}", status_code=status.HTTP_303_SEE_OTHER)
 
     @app.post("/actions/healthcheck", response_class=HTMLResponse)
     def run_health(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
@@ -294,6 +334,48 @@ def create_web_app(
         export_validation_csv(latest_validation, target)
         return FileResponse(target, filename=target.name, media_type="text/csv")
 
+    @app.post("/actions/readiness-review", response_class=HTMLResponse)
+    def update_readiness_review(
+        request: Request,
+        confirmation: str = Form(),
+        broker_restrictions: bool = Form(False),
+        recovery_drill: bool = Form(False),
+        user_acceptance: bool = Form(False),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        try:
+            save_manual_review(
+                application.ledger,
+                confirmation=confirmation,
+                values={
+                    "broker_restrictions": broker_restrictions,
+                    "recovery_drill": recovery_drill,
+                    "user_acceptance": user_acceptance,
+                },
+                observed_at=datetime.now(settings.timezone),
+            )
+            message, ok = "Paper-readiness acknowledgements saved", True
+        except ValueError as exc:
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
+        )
+
+    @app.get("/readiness/report.csv", response_class=FileResponse)
+    def download_readiness(_user: str = Depends(require_login)) -> FileResponse:
+        report = build_readiness_report(
+            settings,
+            application.ledger,
+            connections.archive,
+            connections.snapshot(),
+            web_password=password,
+        )
+        target = settings.data_dir / "exports" / "paper-readiness-review.csv"
+        export_readiness_csv(report, target)
+        return FileResponse(target, filename=target.name, media_type="text/csv")
+
     @app.post("/actions/archive-verify", response_class=HTMLResponse)
     def verify_archive(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
         snapshot = connections.refresh_archive_health()
@@ -407,7 +489,15 @@ def create_web_app(
     ) -> HTMLResponse:
         try:
             snapshot = paper_monitor.set_auto_entry(enabled, confirmation)
-            message, ok = snapshot.auto_entry_last_action, True
+            if enabled:
+                cycle = paper_monitor.run_cycle()
+                message = (
+                    "Automatic paper entries enabled; monitoring started immediately. "
+                    f"{cycle.auto_entry_last_action}"
+                )
+            else:
+                message = snapshot.auto_entry_last_action
+            ok = True
         except ValueError as exc:
             message, ok = str(exc), False
         return templates.TemplateResponse(

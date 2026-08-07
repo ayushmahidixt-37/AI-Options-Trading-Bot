@@ -47,6 +47,16 @@
     .btn.secondary { background:#344054; } .btn.ghost { background:#f2f4f7; color:#344054; } .btn.danger { background:#d92d20; } .btn:disabled { opacity:.55; cursor:wait; }
     input { min-height:40px; padding:8px 10px; border:1px solid #d0d5dd; border-radius:9px; background:white; color:var(--ink); }
     input[type=date] { min-width:145px; }
+    input[type=checkbox] { min-height:0; width:18px; height:18px; accent-color:var(--brand); }
+    .check { display:flex; align-items:flex-start; gap:10px; font-size:.92rem; font-weight:600; }
+    .switch-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; }
+    .switch { position:relative; display:inline-flex; flex:0 0 auto; width:50px; height:28px; }
+    .switch input { position:absolute; width:1px; height:1px; opacity:0; }
+    .switch-track { width:100%; border-radius:999px; background:#d0d5dd; cursor:pointer; transition:background .18s ease; }
+    .switch-track::after { content:""; position:absolute; width:22px; height:22px; left:3px; top:3px; border-radius:50%; background:white; box-shadow:0 1px 3px rgba(16,24,40,.28); transition:transform .18s ease; }
+    .switch input:checked + .switch-track { background:var(--good); }
+    .switch input:checked + .switch-track::after { transform:translateX(22px); }
+    .switch input:focus-visible + .switch-track { outline:3px solid #84adff; outline-offset:2px; }
     label { display:grid; gap:5px; color:#475467; font-size:.84rem; font-weight:650; }
     .form-row { display:flex; align-items:end; gap:10px; flex-wrap:wrap; }
     .divider { border:0; border-top:1px solid var(--line); margin:18px 0; }
@@ -78,6 +88,7 @@
       <button class="tab" data-panel="paper" aria-selected="false">Paper trading</button>
       <button class="tab" data-panel="research" aria-selected="false">Research</button>
       <button class="tab" data-panel="operations" aria-selected="false">Data &amp; operations</button>
+      <button class="tab" data-panel="readiness" aria-selected="false">Readiness review</button>
     </nav>
     {% if message %}<div class="notice {{ 'good' if ok else 'bad' }}" role="status"><strong>{{ 'Done' if ok else 'Attention' }}</strong><span>{{ message }}</span></div>{% endif %}
 
@@ -85,6 +96,7 @@
     {% include "partials/_paper.html" %}
     {% include "partials/_research.html" %}
     {% include "partials/_operations.html" %}
+    {% include "partials/_readiness.html" %}
   </main>
   <script>
     const tabs = [...document.querySelectorAll('.tab')];
@@ -101,7 +113,24 @@
       form.setAttribute('aria-busy', 'true');
       form.querySelectorAll('button').forEach(button => { button.disabled = true; button.dataset.label = button.textContent; button.textContent = 'Working…'; });
     }));
-    {% if connections.angel_status == 'connected' %}window.setTimeout(() => location.reload(), 15000);{% endif %}
+    document.querySelectorAll('[data-auto-paper-toggle]').forEach(toggle => {
+      toggle.addEventListener('change', () => {
+        const form = toggle.form;
+        const enabling = toggle.checked;
+        const prompt = enabling
+          ? 'Enable automatic PAPER entries? The bot will immediately monitor new closed signals. No live order can be placed.'
+          : 'Disable automatic paper entries? Existing paper positions will still be monitored for exits.';
+        if (!window.confirm(prompt)) {
+          toggle.checked = !enabling;
+          return;
+        }
+        form.elements.enabled.value = String(enabling);
+        form.elements.confirmation.value = enabling ? 'ENABLE AUTO PAPER' : 'DISABLE AUTO PAPER';
+        form.requestSubmit();
+      });
+    });
+    function refreshDashboard() { location.replace(`/${location.hash}`); }
+    {% if connections.angel_status == 'connected' %}window.setTimeout(refreshDashboard, 15000);{% endif %}
   </script>
 </body>
 </html>

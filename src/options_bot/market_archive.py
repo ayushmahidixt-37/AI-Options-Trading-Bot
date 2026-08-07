@@ -27,6 +27,14 @@ class ArchiveStats:
     integrity_status: str = "unknown"
 
 
+@dataclass(frozen=True)
+class ReadinessMetrics:
+    trading_days: int
+    observation_count: int
+    successful_runs: int
+    failed_runs: int
+
+
 class MarketArchive:
     """Own a transaction-safe database separate from the paper-order ledger."""
 
@@ -272,6 +280,28 @@ class MarketArchive:
         with self.connect() as con:
             row = con.execute("PRAGMA quick_check").fetchone()
         return str(row[0]) if row else "unknown"
+
+    def readiness_metrics(self) -> ReadinessMetrics:
+        with self.connect() as con:
+            row = con.execute(
+                """SELECT COUNT(DISTINCT date(started_at)), COUNT(*)
+                   FROM market_candles WHERE instrument_token='99926000'"""
+            ).fetchone()
+            observations = int(
+                con.execute("SELECT COUNT(*) FROM strategy_observations").fetchone()[0]
+            )
+            runs = con.execute(
+                """SELECT
+                       SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END)
+                   FROM collection_runs"""
+            ).fetchone()
+        return ReadinessMetrics(
+            trading_days=int(row[0] or 0),
+            observation_count=observations,
+            successful_runs=int(runs[0] or 0),
+            failed_runs=int(runs[1] or 0),
+        )
 
     def latest_candle_at(self, token: str, timeframe: str = "FIVE_MINUTE") -> datetime | None:
         with self.connect() as con:

@@ -1,0 +1,37 @@
+<section id="readiness" class="panel" aria-labelledby="readiness-title">
+  <div class="page-heading">
+    <div><h2 id="readiness-title">Paper-readiness review</h2><p>Evidence gate for reliability, data quality, risk, security and operator acceptance. Completing this review does not enable or approve live trading.</p></div>
+    <a class="btn ghost" href="/readiness/report.csv">Download review CSV</a>
+  </div>
+  <div class="grid">
+    <article class="card span-4">
+      <div class="label">Review status</div>
+      <div class="metric" style="font-size:1.25rem">{{ readiness.status }}</div>
+      <p><span class="badge {{ 'good' if readiness.passed == readiness.total else 'warn' }}">{{ readiness.passed }} of {{ readiness.total }} checks passed</span></p>
+      <dl class="kv"><dt>Archived sessions</dt><dd>{{ readiness.trading_days }}</dd><dt>Closed paper trades</dt><dd>{{ readiness.closed_trades }}</dd><dt>Live trading</dt><dd>NOT APPROVED</dd></dl>
+    </article>
+    <article class="card span-8">
+      <h2>Evidence checklist</h2>
+      <div class="table-wrap"><table><thead><tr><th>Area</th><th>Requirement</th><th>Status</th><th>Evidence</th></tr></thead><tbody>
+      {% for item in readiness.criteria %}<tr><td>{{ item.group }}</td><td><strong>{{ item.label }}</strong></td><td><span class="badge {{ 'good' if item.passed else 'bad' }}">{{ 'PASS' if item.passed else 'BLOCKED' }}</span></td><td>{{ item.detail }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    </article>
+    <article class="card span-8">
+      <h2>Manual review acknowledgements</h2>
+      <p class="muted">Save only after you have actually completed each review. These acknowledgements are stored in the paper ledger and do not change application mode.</p>
+      <form method="post" action="/actions/readiness-review#readiness">
+        <div style="display:grid;gap:12px">
+          <label class="check"><input type="checkbox" name="broker_restrictions" value="true" {% if readiness.manual_review.broker_restrictions %}checked{% endif %}><span>Angel One API permissions, rate limits, redirect/static-IP requirements and applicable broker restrictions have been reviewed.</span></label>
+          <label class="check"><input type="checkbox" name="recovery_drill" value="true" {% if readiness.manual_review.recovery_drill %}checked{% endif %}><span>A tablet restart, application restart, archive verification and paper-position recovery drill has been completed.</span></label>
+          <label class="check"><input type="checkbox" name="user_acceptance" value="true" {% if readiness.manual_review.user_acceptance %}checked{% endif %}><span>The operator has reviewed paper drawdown, data gaps and limitations and understands that no result guarantees profit.</span></label>
+        </div>
+        <div class="form-row" style="margin-top:16px"><label>Type the exact phrase<input required name="confirmation" placeholder="SAVE PAPER REVIEW"></label><button class="btn" type="submit">Save review</button></div>
+      </form>
+    </article>
+    <article class="card span-4 danger-zone">
+      <h2>Safety boundary</h2>
+      <p><strong>This is a review gate—not a live-trading switch.</strong></p>
+      <p class="muted">Even when every item passes, the application continues to require paper mode, live execution remains unreachable, and a separate explicit design and regulatory review would still be required.</p>
+    </article>
+  </div>
+</section>
