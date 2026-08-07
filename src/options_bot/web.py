@@ -129,6 +129,32 @@ def create_web_app(
     def dashboard(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
         return templates.TemplateResponse(request=request, name="dashboard.html", context=dashboard_context(request))
 
+    @app.get("/actions/{action_name}", include_in_schema=False)
+    def redirect_revisited_action(
+        action_name: str,
+        _user: str = Depends(require_login),
+    ) -> RedirectResponse:
+        """Recover when a browser refreshes or revisits a POST-only action URL."""
+        panel = {
+            "healthcheck": "overview",
+            "paper-scan": "overview",
+            "intelligence-refresh": "overview",
+            "paper-proposal": "paper",
+            "paper-confirm": "paper",
+            "paper-close-all": "paper",
+            "auto-paper": "paper",
+            "backtest": "research",
+            "strategy-validation": "research",
+            "angel-connect": "operations",
+            "nifty-refresh": "operations",
+            "instruments-refresh": "operations",
+            "archive-backup": "operations",
+            "archive-verify": "operations",
+            "telegram-test": "operations",
+            "readiness-review": "readiness",
+        }.get(action_name, "overview")
+        return RedirectResponse(url=f"/#{panel}", status_code=status.HTTP_303_SEE_OTHER)
+
     @app.post("/actions/healthcheck", response_class=HTMLResponse)
     def run_health(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
         result = run_health_action(application)

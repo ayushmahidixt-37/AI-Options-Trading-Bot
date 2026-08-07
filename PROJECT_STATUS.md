@@ -68,6 +68,8 @@ paper results are simulations and may not represent future results.
 - Optional automatic paper-only entries, explicitly enabled and persisted.
 - The automation toggle starts a paper-monitor cycle immediately; periodic page
   refreshes always return to the GET dashboard instead of reloading POST routes.
+- Browser refreshes and history navigation that revisit any `/actions/...` URL
+  are redirected to the matching dashboard workspace instead of returning 405.
 - One attempt per closed signal candle prevents restart duplicates.
 - Central checks for entry time, quote freshness, lots, maximum trade loss,
   open positions, duplicate symbols, daily trades, daily loss, and capital.

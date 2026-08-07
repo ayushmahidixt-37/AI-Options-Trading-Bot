@@ -33,6 +33,22 @@ def test_web_dashboard_requires_password(tmp_path: Path) -> None:
     assert response.status_code == 401
 
 
+def test_revisited_post_action_redirects_to_dashboard(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+
+    redirect = client.get(
+        "/actions/healthcheck#paper",
+        auth=auth(),
+        follow_redirects=False,
+    )
+
+    assert redirect.status_code == 303
+    assert redirect.headers["location"] == "/#overview"
+    recovered = client.get(redirect.headers["location"], auth=auth())
+    assert recovered.status_code == 200
+    assert "Today at a glance" in recovered.text
+
+
 def test_web_lifespan_starts_and_stops_background_monitor(tmp_path: Path) -> None:
     cfg = settings(tmp_path)
     connections = ConnectionManager(cfg)
