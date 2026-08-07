@@ -20,6 +20,7 @@ from .config import Settings
 from .health import healthcheck
 from .paper_monitor import PaperPositionMonitor
 from .risk import RiskRejected
+from .validation import ValidationReport, export_validation_csv, run_strategy_validation
 
 security = HTTPBasic()
 TEMPLATE_DIR = Path(__file__).with_name("templates")
@@ -40,6 +41,7 @@ def create_web_app(
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     latest_backtest: BacktestResult | None = None
     latest_proposal: PaperTradeProposal | None = None
+    latest_validation: ValidationReport | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -104,6 +106,7 @@ def create_web_app(
                 ("All time", application.ledger.performance_summary()),
             ),
             "trade_journal": application.ledger.trade_journal(25),
+            "validation": latest_validation,
             "message": message,
             "ok": ok,
         }
@@ -247,6 +250,48 @@ def create_web_app(
             raise HTTPException(status_code=404, detail="Run a backtest first")
         target = settings.data_dir / "exports" / "backtest-trades.csv"
         export_backtest_csv(latest_backtest, target)
+        return FileResponse(target, filename=target.name, media_type="text/csv")
+
+    @app.post("/actions/strategy-validation", response_class=HTMLResponse)
+    def run_validation(
+        request: Request,
+        development_start: str = Form(),
+        development_end: str = Form(),
+        validation_start: str = Form(),
+        validation_end: str = Form(),
+        test_start: str = Form(),
+        test_end: str = Form(),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        nonlocal latest_validation
+        try:
+            latest_validation = run_strategy_validation(
+                connections.archive,
+                settings,
+                development_start=date.fromisoformat(development_start),
+                development_end=date.fromisoformat(development_end),
+                validation_start=date.fromisoformat(validation_start),
+                validation_end=date.fromisoformat(validation_end),
+                test_start=date.fromisoformat(test_start),
+                test_end=date.fromisoformat(test_end),
+            )
+            message = f"Strategy validation completed · {latest_validation.status}"
+            ok = True
+        except ValueError as exc:
+            latest_validation = None
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
+        )
+
+    @app.get("/validation/comparison.csv", response_class=FileResponse)
+    def download_validation(_user: str = Depends(require_login)) -> FileResponse:
+        if latest_validation is None:
+            raise HTTPException(status_code=404, detail="Run strategy validation first")
+        target = settings.data_dir / "exports" / "strategy-validation.csv"
+        export_validation_csv(latest_validation, target)
         return FileResponse(target, filename=target.name, media_type="text/csv")
 
     @app.post("/actions/archive-verify", response_class=HTMLResponse)

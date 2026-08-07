@@ -116,3 +116,16 @@ def test_integrity_latest_candle_and_gap_summary(tmp_path: Path) -> None:
             "last_missing": (started + timedelta(minutes=5)).isoformat(),
         }
     ]
+
+
+def test_operational_state_and_backup_rotation_are_durable(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    now = datetime(2026, 8, 7, 10, 0, tzinfo=IST)
+    store.set_operational_state("monitor_heartbeat", now.isoformat(), now)
+    backup_dir = tmp_path / "backups"
+    for day in range(4):
+        store.backup(backup_dir / f"market-data-2026080{day + 1}.sqlite3")
+
+    assert store.operational_state()["monitor_heartbeat"]["value"] == now.isoformat()
+    assert store.rotate_backups(backup_dir, 2) == 2
+    assert len(list(backup_dir.glob("*.sqlite3"))) == 2

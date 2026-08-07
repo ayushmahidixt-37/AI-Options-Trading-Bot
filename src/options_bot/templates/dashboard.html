@@ -3,329 +3,105 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Options Trading Bot</title>
+  <title>Paper Trading Control Center</title>
   <style>
-    body { margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f7fb; color: #162033; }
-    header { background: #0f172a; color: white; padding: 1.2rem 2rem; }
-    main { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
-    .card { background: white; border: 1px solid #d8deea; border-radius: 14px; box-shadow: 0 8px 20px rgba(15, 23, 42, .06); padding: 1rem; margin-bottom: 1rem; }
-    .safe { color: #047857; font-weight: 700; }
-    .blocked { color: #b91c1c; font-weight: 700; }
-    .message { padding: .8rem 1rem; border-radius: 10px; margin-bottom: 1rem; border: 1px solid; }
-    .message.ok { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
-    .message.bad { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
-    button { border: 0; background: #2563eb; color: white; border-radius: 10px; padding: .7rem 1rem; cursor: pointer; font-weight: 650; }
-    button.secondary { background: #334155; }
-    button.danger { background: #dc2626; }
-    input { padding: .6rem; border: 1px solid #cbd5e1; border-radius: 8px; max-width: 9rem; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: .75rem; border-bottom: 1px solid #e2e8f0; text-align: left; }
-    th { background: #f8fafc; }
-    .actions { display: flex; gap: .7rem; flex-wrap: wrap; }
-    code { background: #e2e8f0; padding: .15rem .35rem; border-radius: 5px; }
+    :root { --ink:#152033; --muted:#667085; --line:#e4e7ec; --surface:#fff; --canvas:#f6f7fb; --nav:#111827; --brand:#2563eb; --brand-soft:#eff6ff; --good:#067647; --good-bg:#ecfdf3; --warn:#b54708; --warn-bg:#fffaeb; --bad:#b42318; --bad-bg:#fef3f2; --radius:14px; --shadow:0 8px 24px rgba(16,24,40,.06); }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:var(--canvas); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    button,input { font:inherit; }
+    a { color:#175cd3; }
+    .app-header { background:var(--nav); color:white; padding:18px clamp(16px,4vw,40px); }
+    .header-inner,.page { max-width:1240px; margin:auto; }
+    .header-inner { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+    .brand { display:flex; align-items:center; gap:12px; }
+    .brand-mark { display:grid; place-items:center; width:40px; height:40px; border-radius:11px; background:#2563eb; font-weight:800; }
+    h1,h2,h3,p { margin-top:0; }
+    h1 { margin:0; font-size:1.2rem; }
+    h2 { margin-bottom:6px; font-size:1.25rem; }
+    h3 { margin-bottom:10px; font-size:1rem; }
+    .subtitle,.muted,small { color:var(--muted); }
+    .app-header .subtitle { color:#cbd5e1; margin:2px 0 0; font-size:.86rem; }
+    .mode-pill { padding:7px 11px; border:1px solid #344054; border-radius:999px; color:#d1fadf; white-space:nowrap; }
+    .page { padding:22px clamp(14px,3vw,32px) 48px; }
+    .tabs { position:sticky; top:0; z-index:5; display:flex; gap:6px; overflow:auto; padding:8px; margin-bottom:20px; background:rgba(246,247,251,.96); backdrop-filter:blur(8px); border-bottom:1px solid var(--line); }
+    .tab { border:0; background:transparent; color:#475467; padding:10px 14px; border-radius:9px; font-weight:650; white-space:nowrap; cursor:pointer; }
+    .tab[aria-selected="true"] { color:#1849a9; background:var(--brand-soft); }
+    .panel { display:none; }
+    .panel.active { display:block; }
+    .page-heading { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; margin-bottom:18px; }
+    .page-heading p { margin:0; color:var(--muted); max-width:720px; }
+    .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:16px; }
+    .span-3 { grid-column:span 3; } .span-4 { grid-column:span 4; } .span-6 { grid-column:span 6; } .span-8 { grid-column:span 8; } .span-12 { grid-column:1/-1; }
+    .card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); }
+    .card + .card { margin-top:16px; }
+    .metric { font-size:1.65rem; font-weight:750; letter-spacing:-.03em; margin:4px 0; }
+    .label { color:var(--muted); font-size:.8rem; font-weight:650; text-transform:uppercase; letter-spacing:.04em; }
+    .badge { display:inline-flex; align-items:center; gap:6px; padding:4px 9px; border-radius:999px; font-size:.78rem; font-weight:700; }
+    .badge.good { color:var(--good); background:var(--good-bg); } .badge.warn { color:var(--warn); background:var(--warn-bg); } .badge.bad { color:var(--bad); background:var(--bad-bg); } .badge.neutral { color:#344054; background:#f2f4f7; }
+    .dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
+    .notice { display:flex; gap:10px; padding:12px 14px; margin-bottom:18px; border-radius:11px; border:1px solid; }
+    .notice.good { color:var(--good); background:var(--good-bg); border-color:#abefc6; } .notice.bad { color:var(--bad); background:var(--bad-bg); border-color:#fecdca; }
+    .stack { display:flex; flex-wrap:wrap; gap:10px; align-items:center; }
+    .btn { border:0; border-radius:9px; padding:10px 14px; background:var(--brand); color:white; font-weight:700; cursor:pointer; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+    .btn:hover { filter:brightness(.95); } .btn:focus-visible,.tab:focus-visible,input:focus-visible { outline:3px solid #84adff; outline-offset:2px; }
+    .btn.secondary { background:#344054; } .btn.ghost { background:#f2f4f7; color:#344054; } .btn.danger { background:#d92d20; } .btn:disabled { opacity:.55; cursor:wait; }
+    input { min-height:40px; padding:8px 10px; border:1px solid #d0d5dd; border-radius:9px; background:white; color:var(--ink); }
+    input[type=date] { min-width:145px; }
+    label { display:grid; gap:5px; color:#475467; font-size:.84rem; font-weight:650; }
+    .form-row { display:flex; align-items:end; gap:10px; flex-wrap:wrap; }
+    .divider { border:0; border-top:1px solid var(--line); margin:18px 0; }
+    .kv { display:grid; grid-template-columns:minmax(130px,1fr) auto; gap:8px 16px; margin:0; }
+    .kv dt { color:var(--muted); } .kv dd { margin:0; font-weight:650; text-align:right; }
+    .table-wrap { overflow:auto; border:1px solid var(--line); border-radius:11px; }
+    table { width:100%; border-collapse:collapse; min-width:700px; font-size:.88rem; }
+    th { color:#475467; background:#f9fafb; font-size:.76rem; text-transform:uppercase; letter-spacing:.035em; }
+    th,td { padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    tr:last-child td { border-bottom:0; }
+    details { border-top:1px solid var(--line); margin-top:16px; padding-top:14px; }
+    summary { cursor:pointer; color:#344054; font-weight:700; }
+    .empty { padding:22px; text-align:center; border:1px dashed #d0d5dd; border-radius:11px; color:var(--muted); background:#fcfcfd; }
+    .danger-zone { border-color:#fecdca; background:linear-gradient(180deg,#fff,#fffafa); }
+    code { padding:2px 5px; border-radius:5px; background:#f2f4f7; }
+    [aria-busy="true"] { opacity:.72; }
+    @media (max-width:900px) { .span-3,.span-4 { grid-column:span 6; } .span-6,.span-8 { grid-column:1/-1; } }
+    @media (max-width:600px) { .span-3,.span-4,.span-6 { grid-column:1/-1; } .header-inner { align-items:flex-start; } .page-heading { display:block; } .mode-pill { font-size:.72rem; } .card { padding:15px; } .form-row,.form-row label,.form-row input,.form-row .btn { width:100%; } .tabs { margin-inline:-14px; padding-inline:14px; } }
   </style>
 </head>
 <body>
-  <header>
-    <h1>AI Options Trading Bot</h1>
-    <p>Local UI · Paper mode · Telegram alerts only</p>
-  </header>
-  <main>
-    {% if message %}
-      <div class="message {{ 'ok' if ok else 'bad' }}">{{ message }}</div>
-    {% endif %}
+  <header class="app-header"><div class="header-inner">
+    <div class="brand"><div class="brand-mark">AO</div><div><h1>AI Options Paper Lab</h1><p class="subtitle">NIFTY research, archive and simulated execution</p></div></div>
+    <div class="mode-pill">Paper mode · Live orders blocked</div>
+  </div></header>
+  <main class="page">
+    <nav class="tabs" aria-label="Workspace">
+      <button class="tab" data-panel="overview" aria-selected="true">Overview</button>
+      <button class="tab" data-panel="paper" aria-selected="false">Paper trading</button>
+      <button class="tab" data-panel="research" aria-selected="false">Research</button>
+      <button class="tab" data-panel="operations" aria-selected="false">Data &amp; operations</button>
+    </nav>
+    {% if message %}<div class="notice {{ 'good' if ok else 'bad' }}" role="status"><strong>{{ 'Done' if ok else 'Attention' }}</strong><span>{{ message }}</span></div>{% endif %}
 
-    <section class="grid">
-      <div class="card">
-        <h2>Safety</h2>
-        <p>Mode: <span class="safe">{{ settings.trading_mode }}</span></p>
-        <p>Live trading: <span class="{{ 'blocked' if settings.live_trading_enabled else 'safe' }}">{{ settings.live_trading_enabled }}</span></p>
-        <p>Auto start: <span class="{{ 'blocked' if settings.auto_start else 'safe' }}">{{ settings.auto_start }}</span></p>
-      </div>
-      <div class="card">
-        <h2>Health</h2>
-        <p>Status: <span class="{{ 'safe' if health.ok else 'blocked' }}">{{ 'OK' if health.ok else 'FAILED' }}</span></p>
-        {% for name, value in health.checks.items() %}
-          <p><code>{{ name }}</code>: {{ value }}</p>
-        {% endfor %}
-      </div>
-      <div class="card">
-        <h2>Paper Account</h2>
-        <p>Starting capital: {{ '%.2f'|format(account.starting_capital) }}</p>
-        <p>Realized PnL: {{ '%.2f'|format(account.realized_pnl) }}</p>
-        <p>Fees paid: {{ '%.2f'|format(account.fees_paid) }}</p>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>NIFTY five-minute market intelligence</h2>
-      <p>Read-only analysis from closed Angel One candles. This section cannot place an order.</p>
-      <p>Background monitor: <span class="{{ 'safe' if connections.monitor_status == 'running' else 'blocked' }}">{{ connections.monitor_status }}</span>
-        · Last cycle: {{ connections.monitor_last_run_at.strftime('%Y-%m-%d %H:%M:%S %Z') if connections.monitor_last_run_at else 'Not run yet' }}</p>
-      {% if connections.monitor_error %}<p class="blocked">Monitor will retry automatically: {{ connections.monitor_error }}</p>{% endif %}
-      <div class="grid">
-        <div>
-          <h3>Session &amp; data</h3>
-          <p>Session window: <span class="{{ 'safe' if connections.market_status == 'OPEN' else 'blocked' }}">{{ connections.market_status }}</span></p>
-          <p>Timeframe: <strong>5 minutes</strong></p>
-          <p>Candles loaded: {{ connections.candle_count }}</p>
-          <p>Latest closed candle: {{ connections.latest_candle_at.strftime('%Y-%m-%d %H:%M:%S %Z') if connections.latest_candle_at else 'Not loaded' }}</p>
-          <p>Data: <span class="{{ 'safe' if connections.data_status == 'fresh' else 'blocked' }}">{{ connections.data_status }}</span></p>
-        </div>
-        <div>
-          <h3>Indicators</h3>
-          <p>EMA 9: {{ '%.2f'|format(connections.ema_fast) if connections.ema_fast is not none else 'Not loaded' }}</p>
-          <p>EMA 21: {{ '%.2f'|format(connections.ema_slow) if connections.ema_slow is not none else 'Not loaded' }}</p>
-          <p>RSI 14: {{ '%.2f'|format(connections.rsi_value) if connections.rsi_value is not none else 'Not loaded' }}</p>
-          <p>ATR 14: {{ '%.2f'|format(connections.atr_value) if connections.atr_value is not none else 'Not loaded' }}</p>
-        </div>
-        <div>
-          <h3>Read-only signal</h3>
-          <p>Signal: <span class="{{ 'safe' if connections.signal_label in ['BULLISH', 'BEARISH'] else 'blocked' }}">{{ connections.signal_label }}</span></p>
-          <p>Confidence: {{ '%.0f%%'|format(connections.signal_confidence * 100) if connections.signal_confidence is not none else 'Not available' }}</p>
-          <p>Reason: {{ connections.signal_reason }}</p>
-          {% if connections.intelligence_error %}<p class="blocked">Error: {{ connections.intelligence_error }}</p>{% endif %}
-          <form method="post" action="/actions/intelligence-refresh"><button class="secondary" type="submit">Refresh 5-minute analysis</button></form>
-        </div>
-      </div>
-      <p><small>Session status uses the weekday 09:15–15:30 IST window and {{ settings.nse_holidays|length }} configured NSE holiday date(s).</small></p>
-    </section>
-
-    <section class="card">
-      <h2>Historical market archive</h2>
-      <p>Permanent SQLite storage for backtesting. Excel-compatible CSV is an export, not the master copy.</p>
-      <div class="grid">
-        <div>
-          <h3>Local database</h3>
-          <p>Status: <span class="{{ 'safe' if connections.archive_status == 'ready' else 'blocked' }}">{{ connections.archive_status }}</span></p>
-          <p>NIFTY candles: {{ connections.archived_nifty_candles }}</p>
-          <p>Option candles: {{ connections.archived_option_candles }}</p>
-          <p>Known NIFTY options: {{ connections.archived_instruments }}</p>
-          <p>Size: {{ '%.2f'|format(connections.archive_bytes / 1048576) }} MB</p>
-          <p>Possible intraday gaps: {{ connections.archive_gaps }}</p>
-          <p>Integrity: <span class="{{ 'safe' if connections.archive_integrity == 'ok' else 'blocked' }}">{{ connections.archive_integrity }}</span></p>
-          <form method="post" action="/actions/archive-verify"><button class="secondary" type="submit">Verify database</button></form>
-          {% if connections.archive_error %}<p class="blocked">{{ connections.archive_error }}</p>{% endif %}
-        </div>
-        <div>
-          <h3>Coverage</h3>
-          <p>Oldest candle: {{ connections.archive_oldest_at or 'Not collected' }}</p>
-          <p>Newest candle: {{ connections.archive_newest_at or 'Not collected' }}</p>
-          <p>Nearest archived expiry: {{ connections.nearest_expiry or 'Not loaded' }}</p>
-          <p>Current ATM strike: {{ '%.2f'|format(connections.atm_strike) if connections.atm_strike is not none else 'Not loaded' }}</p>
-          <p>Option collection: <span class="{{ 'safe' if connections.option_archive_status == 'success' else 'blocked' }}">{{ connections.option_archive_status }}</span></p>
-          <p>Contracts tracked: {{ connections.option_contracts_tracked }}</p>
-          {% if connections.option_archive_error %}<p class="blocked">{{ connections.option_archive_error }}</p>{% endif %}
-          <form method="post" action="/actions/instruments-refresh"><button class="secondary" type="submit">Refresh option instruments</button></form>
-        </div>
-        <div>
-          <h3>Export &amp; backup</h3>
-          <p>Downloads do not remove or change the master database.</p>
-          <p><a href="/archive/candles.csv">Download candle CSV</a></p>
-          <form method="post" action="/actions/archive-backup"><button class="secondary" type="submit">Download database backup</button></form>
-        </div>
-      </div>
-      <hr>
-      <h3>Offline backtest</h3>
-      <p>Uses only archived signals and option candles. It cannot call Angel One or place an order.</p>
-      <form method="post" action="/actions/backtest">
-        <label>Start date <input type="date" name="start_date"></label>
-        <label>End date <input type="date" name="end_date"></label>
-        <button class="secondary" type="submit">Run archived backtest</button>
-      </form>
-      {% if backtest %}
-        <p>Status: <strong>{{ backtest.status }}</strong> · Trades: {{ backtest.trades }} · Winners: {{ backtest.winners }} · Losers: {{ backtest.losers }}</p>
-        <p>Trading days: {{ backtest.trading_days }} · Detected archive gaps: {{ backtest.data_gaps }}</p>
-        <p>Win rate: {{ '%.1f%%'|format(backtest.win_rate * 100) }} · Gross option points: {{ '%.2f'|format(backtest.gross_pnl_points) }}</p>
-        <p>Net paper P&amp;L: {{ '%.2f'|format(backtest.net_pnl) }} · Fees: {{ '%.2f'|format(backtest.fees_paid) }} · Maximum drawdown: {{ '%.2f'|format(backtest.max_drawdown) }}</p>
-        <p>Profit factor: {{ '%.2f'|format(backtest.profit_factor) if backtest.profit_factor is not none else 'No losing trades' }}</p>
-        <p><small>{{ backtest.reason }}</small></p>
-        {% if backtest.trade_details %}
-          <p><a href="/backtest/trades.csv">Download detailed trade CSV</a></p>
-          <div style="overflow-x:auto"><table><thead><tr><th>Signal</th><th>Contract</th><th>Entry</th><th>Stop</th><th>Exit</th><th>Reason</th><th>Net P&amp;L</th></tr></thead><tbody>
-          {% for trade in backtest.trade_details %}<tr>
-            <td>{{ trade.signal_at.strftime('%Y-%m-%d %H:%M') }} {{ trade.direction }}</td><td>{{ trade.symbol }}</td>
-            <td>{{ '%.2f'|format(trade.entry_price) }}</td><td>{{ '%.2f'|format(trade.stop_price) }}</td><td>{{ '%.2f'|format(trade.exit_price) }}</td>
-            <td>{{ trade.exit_reason }}</td><td>{{ '%.2f'|format(trade.net_pnl) }}</td>
-          </tr>{% endfor %}</tbody></table></div>
-        {% endif %}
-      {% endif %}
-    </section>
-
-    <section class="card">
-      <h2>Confirmed paper-entry workflow</h2>
-      <p>This never places a real order. Creating a proposal is read-only; opening a simulated position requires a separate confirmation.</p>
-      <p>Paper exit monitor: <span class="{{ 'safe' if paper_monitor.status == 'running' else 'blocked' }}">{{ paper_monitor.status }}</span>
-        · Checked: {{ paper_monitor.positions_checked }} · Closed on last cycle: {{ paper_monitor.positions_closed }}</p>
-      <p>Recovered after startup: {{ paper_monitor.recovered_positions }} · Estimated open P&amp;L after paper costs: <strong>{{ '%.2f'|format(paper_monitor.total_unrealized_pnl) }}</strong></p>
-      <p>Last exit action: {{ paper_monitor.last_action }}</p>
-      <p>Automatic paper entries: <span class="{{ 'blocked' if paper_monitor.auto_entry_enabled else 'safe' }}">{{ 'ENABLED' if paper_monitor.auto_entry_enabled else 'DISABLED' }}</span></p>
-      <p>{{ paper_monitor.auto_entry_last_action }}</p>
-      {% if paper_monitor.error %}<p class="blocked">{{ paper_monitor.error }}</p>{% endif %}
-      <form method="post" action="/actions/paper-proposal"><button class="secondary" type="submit">Create fresh paper proposal</button></form>
-      {% if proposal %}
-        <div class="grid">
-          <div>
-            <h3>{{ proposal.direction }} · {{ proposal.instrument.option_type }}</h3>
-            <p>Contract: <strong>{{ proposal.instrument.symbol }}</strong></p>
-            <p>Expiry: {{ proposal.instrument.expiry }} · Strike: {{ '%.2f'|format(proposal.instrument.strike) }}</p>
-            <p>Lot size: {{ proposal.instrument.lot_size }} · Lots: 1</p>
-          </div>
-          <div>
-            <h3>Fresh quote &amp; risk</h3>
-            <p>Quote: {{ '%.2f'|format(proposal.quote.price) }} · Stop: {{ '%.2f'|format(proposal.stop_price) }}</p>
-            <p>Estimated maximum loss: {{ '%.2f'|format(proposal.estimated_max_loss) }}</p>
-            <p>Confidence: {{ '%.0f%%'|format(proposal.confidence * 100) }}</p>
-            <p>{{ proposal.reason }}</p>
-          </div>
-          <div>
-            <h3>Explicit confirmation</h3>
-            <p>A new quote and all risk limits are checked again when you confirm.</p>
-            <form method="post" action="/actions/paper-confirm">
-              <input type="hidden" name="proposal_id" value="{{ proposal.proposal_id }}">
-              <button type="submit">Confirm one-lot paper entry</button>
-            </form>
-          </div>
-        </div>
-      {% endif %}
-      {% if paper_monitor.position_quotes %}
-        <h3>Fresh paper-position quotes</h3>
-        <div style="overflow-x:auto"><table><thead><tr><th>Symbol</th><th>LTP</th><th>Stop</th><th>Estimated P&amp;L</th><th>Quoted</th></tr></thead><tbody>
-        {% for quote in paper_monitor.position_quotes %}<tr><td>{{ quote.symbol }}</td><td>{{ '%.2f'|format(quote.ltp) }}</td><td>{{ '%.2f'|format(quote.stop_price) }}</td><td>{{ '%.2f'|format(quote.unrealized_pnl) }}</td><td>{{ quote.quoted_at.strftime('%H:%M:%S %Z') }}</td></tr>{% endfor %}
-        </tbody></table></div>
-      {% endif %}
-      {% if positions %}
-        <hr>
-        <h3 class="blocked">Emergency paper kill switch</h3>
-        <p>This closes every simulated position using a fresh market quote. It cannot place or close a real order.</p>
-        <form method="post" action="/actions/paper-close-all">
-          <input required name="confirmation" type="text" placeholder="CLOSE ALL PAPER" style="max-width:14rem">
-          <button class="danger" type="submit">Close all paper positions</button>
-        </form>
-      {% endif %}
-      <hr>
-      <h3>Automatic paper-entry control</h3>
-      <p>Disabled by default. When enabled, each newly closed actionable five-minute signal can create at most one simulated one-lot entry after all risk checks pass.</p>
-      {% if paper_monitor.auto_entry_enabled %}
-        <form method="post" action="/actions/auto-paper">
-          <input type="hidden" name="enabled" value="false">
-          <input required name="confirmation" type="text" placeholder="DISABLE AUTO PAPER" style="max-width:15rem">
-          <button class="danger" type="submit">Disable automatic paper entries</button>
-        </form>
-      {% else %}
-        <form method="post" action="/actions/auto-paper">
-          <input type="hidden" name="enabled" value="true">
-          <input required name="confirmation" type="text" placeholder="ENABLE AUTO PAPER" style="max-width:15rem">
-          <button type="submit">Enable automatic paper entries</button>
-        </form>
-      {% endif %}
-    </section>
-
-    <section class="card">
-      <h2>Today's paper report &amp; audit trail</h2>
-      <div class="grid">
-        <div><h3>Daily summary</h3>
-          <p>Trades: {{ daily_summary.trades }} · Wins: {{ daily_summary.wins }} · Losses: {{ daily_summary.losses }}</p>
-          <p>Net realized P&amp;L: <strong>{{ '%.2f'|format(daily_summary.net_pnl) }}</strong></p>
-          <p>Fees: {{ '%.2f'|format(daily_summary.fees) }} · Open positions: {{ daily_summary.open_positions }}</p>
-        </div>
-        <div><h3>Recent safety events</h3>
-          {% if recent_events %}<div style="overflow-x:auto"><table><thead><tr><th>Time</th><th>Level</th><th>Event</th><th>Details</th></tr></thead><tbody>
-          {% for event in recent_events %}<tr><td>{{ event.occurred_at }}</td><td>{{ event.level }}</td><td>{{ event.event_type }}</td><td>{{ event.details }}</td></tr>{% endfor %}
-          </tbody></table></div>{% else %}<p>No paper lifecycle events recorded yet.</p>{% endif %}
-        </div>
-      </div>
-      <hr>
-      <h3>Closed-trade analytics</h3>
-      <div style="overflow-x:auto"><table><thead><tr><th>Period</th><th>Trades</th><th>Win rate</th><th>Net P&amp;L</th><th>Avg win/loss</th><th>Reward:risk</th><th>Profit factor</th><th>Max drawdown</th></tr></thead><tbody>
-      {% for label, performance in performance_windows %}<tr><td>{{ label }}</td><td>{{ performance.trades }}</td><td>{{ '%.1f%%'|format(performance.win_rate * 100) }}</td><td>{{ '%.2f'|format(performance.net_pnl) }}</td><td>{{ '%.2f'|format(performance.average_win) }} / {{ '%.2f'|format(performance.average_loss) }}</td><td>{{ '%.2f'|format(performance.reward_risk) if performance.reward_risk is not none else '-' }}</td><td>{{ '%.2f'|format(performance.profit_factor) if performance.profit_factor is not none else '-' }}</td><td>{{ '%.2f'|format(performance.max_drawdown) }}</td></tr>{% endfor %}
-      </tbody></table></div>
-      {% if trade_journal %}
-        <h3>Detailed paper journal</h3>
-        <div style="overflow-x:auto"><table><thead><tr><th>Entry</th><th>Signal</th><th>Contract</th><th>Indicators</th><th>Risk</th><th>Excursion</th><th>Exit</th><th>Net P&amp;L</th></tr></thead><tbody>
-        {% for trade in trade_journal %}<tr>
-          <td>{{ trade.created_at }}</td><td>{{ trade.direction }}<br>{{ '%.0f%%'|format(trade.confidence * 100) if trade.confidence is not none else '' }}</td>
-          <td>{{ trade.symbol }}<br>{{ trade.expiry or '' }} · {{ trade.strike or '' }}</td>
-          <td>EMA {{ trade.ema_fast or '-' }}/{{ trade.ema_slow or '-' }}<br>RSI {{ trade.rsi_value or '-' }} · ATR {{ trade.atr_value or '-' }}</td>
-          <td>Stop {{ '%.2f'|format(trade.stop_price) }}<br>Max {{ '%.2f'|format(trade.estimated_max_loss) if trade.estimated_max_loss is not none else '-' }}</td>
-          <td>Favorable {{ '%.2f'|format(trade.max_favorable_points) }}<br>Adverse {{ '%.2f'|format(trade.max_adverse_points) }}</td>
-          <td>{{ trade.close_reason or 'OPEN' }}<br>{{ trade.closed_at or '' }}</td><td>{{ '%.2f'|format(trade.realized_pnl) if trade.realized_pnl is not none else 'OPEN' }}</td>
-        </tr>{% endfor %}</tbody></table></div>
-      {% else %}<p>No journaled proposal trades yet.</p>{% endif %}
-    </section>
-
-    <section class="card">
-      <h2>Connections &amp; NIFTY market data</h2>
-      <p>This panel reads market data only. It cannot place a real order.</p>
-      <div class="grid">
-        <div>
-          <h3>Angel One</h3>
-          <p>Status: <span class="{{ 'safe' if connections.angel_status == 'connected' else 'blocked' }}">{{ connections.angel_status }}</span></p>
-          <p>Last login: {{ connections.last_login_at.strftime('%Y-%m-%d %H:%M:%S %Z') if connections.last_login_at else 'Never' }}</p>
-          <p>Reconnects: {{ connections.reconnect_count }} · Catch-up: {{ connections.catchup_status }}</p>
-          <p>Client: <code>{{ connections.angel_client }}</code></p>
-          {% if connections.angel_error %}<p class="blocked">Reason: {{ connections.angel_error }}</p>{% endif %}
-          <form method="post" action="/actions/angel-connect"><button type="submit">Test Angel connection</button></form>
-        </div>
-        <div>
-          <h3>NIFTY</h3>
-          <p>Spot: <strong>{{ '%.2f'|format(connections.nifty_price) if connections.nifty_price else 'Not loaded' }}</strong></p>
-          <p>Updated: {{ connections.quote_observed_at.strftime('%Y-%m-%d %H:%M:%S %Z') if connections.quote_observed_at else 'Never' }}</p>
-          {% if connections.quote_error %}<p class="blocked">Reason: {{ connections.quote_error }}</p>{% endif %}
-          <p>Refresh: every 15 seconds after connection</p>
-          <form id="nifty-refresh-form" method="post" action="/actions/nifty-refresh"><button class="secondary" type="submit">Refresh NIFTY</button></form>
-        </div>
-        <div>
-          <h3>Telegram alerts</h3>
-          <p>Status: <span class="{{ 'safe' if connections.telegram_status == 'connected' else 'blocked' }}">{{ connections.telegram_status }}</span></p>
-          <form method="post" action="/actions/telegram-test"><button class="secondary" type="submit">Send test alert</button></form>
-        </div>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>UI-driven actions</h2>
-      <p>These buttons are paper-safe. The scan button does not place orders until market-data and confirmation flows are wired.</p>
-      <div class="actions">
-        <form method="post" action="/actions/healthcheck"><button type="submit">Run healthcheck</button></form>
-        <form method="post" action="/actions/paper-scan"><button class="secondary" type="submit">Run paper scan</button></form>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Open paper positions</h2>
-      {% if positions %}
-        <table>
-          <thead><tr><th>ID</th><th>Symbol</th><th>Units</th><th>Entry</th><th>Stop</th><th>Close manually</th></tr></thead>
-          <tbody>
-          {% for position in positions %}
-            <tr>
-              <td>{{ position.id }}</td>
-              <td>{{ position.symbol }}</td>
-              <td>{{ position.units }}</td>
-              <td>{{ position.entry_fill_price }}</td>
-              <td>{{ position.stop_price }}</td>
-              <td>
-                <form method="post" action="/positions/{{ position.id }}/close">
-                  <input required name="exit_price" type="number" min="0.01" step="0.01" placeholder="Exit price">
-                  <input name="reason" type="text" value="ui-close">
-                  <button class="danger" type="submit">Close paper</button>
-                </form>
-              </td>
-            </tr>
-          {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p>No open paper positions.</p>
-      {% endif %}
-    </section>
+    {% include "partials/_overview.html" %}
+    {% include "partials/_paper.html" %}
+    {% include "partials/_research.html" %}
+    {% include "partials/_operations.html" %}
   </main>
-  {% if connections.angel_status == 'connected' %}
   <script>
-    window.setTimeout(() => window.location.reload(), 15000);
+    const tabs = [...document.querySelectorAll('.tab')];
+    const panels = [...document.querySelectorAll('.panel')];
+    function activate(id) {
+      const selected = panels.some(panel => panel.id === id) ? id : 'overview';
+      tabs.forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.panel === selected)));
+      panels.forEach(panel => panel.classList.toggle('active', panel.id === selected));
+      if (location.hash !== `#${selected}`) history.replaceState(null, '', `#${selected}`);
+    }
+    tabs.forEach(tab => tab.addEventListener('click', () => activate(tab.dataset.panel)));
+    activate(location.hash.slice(1));
+    document.querySelectorAll('form').forEach(form => form.addEventListener('submit', () => {
+      form.setAttribute('aria-busy', 'true');
+      form.querySelectorAll('button').forEach(button => { button.disabled = true; button.dataset.label = button.textContent; button.textContent = 'Working…'; });
+    }));
+    {% if connections.angel_status == 'connected' %}window.setTimeout(() => location.reload(), 15000);{% endif %}
   </script>
-  {% endif %}
 </body>
 </html>

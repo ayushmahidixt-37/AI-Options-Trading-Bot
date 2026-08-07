@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 import csv
 from pathlib import Path
 
@@ -90,35 +90,61 @@ class OptionBacktestTrade:
     raw_points: float
 
 
+@dataclass(frozen=True)
+class BacktestParameters:
+    """Explicit, offline-only strategy comparison parameters."""
+
+    name: str = "Baseline"
+    bullish_rsi_min: float | None = None
+    bearish_rsi_max: float | None = None
+    minimum_atr: float | None = None
+    entry_start: time | None = None
+    entry_end: time | None = None
+    exclude_expiry_day: bool = False
+    stop_risk_fraction: float = 0.8
+    maximum_hold_minutes: int | None = None
+    target_return: float | None = None
+    trailing_stop: float | None = None
+    allowed_weekdays: tuple[int, ...] | None = None
+
+
 def run_momentum_backtest(
     archive: MarketArchive,
     start: date | None = None,
     end: date | None = None,
     settings: Settings | None = None,
+    parameters: BacktestParameters | None = None,
 ) -> BacktestResult:
     """Replay archived signals and option candles without network or order calls."""
     clauses: list[str] = []
-    parameters: list[str] = []
+    sql_parameters: list[str] = []
     if start:
         clauses.append("date(observed_at)>=?")
-        parameters.append(start.isoformat())
+        sql_parameters.append(start.isoformat())
     if end:
         clauses.append("date(observed_at)<=?")
-        parameters.append(end.isoformat())
+        sql_parameters.append(end.isoformat())
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with archive.connect() as con:
         observations = con.execute(
-            f"""SELECT observed_at, spot, signal FROM strategy_observations
+            f"""SELECT observed_at, spot, signal, rsi, atr FROM strategy_observations
                 {where} AND signal IN ('BULLISH','BEARISH')
                 ORDER BY observed_at"""
             if where
-            else """SELECT observed_at, spot, signal FROM strategy_observations
+            else """SELECT observed_at, spot, signal, rsi, atr FROM strategy_observations
                      WHERE signal IN ('BULLISH','BEARISH') ORDER BY observed_at""",
-            parameters,
+            sql_parameters,
         ).fetchall()
+        variant = parameters or BacktestParameters()
+        observations = [
+            row
+            for row in observations
+            if _observation_allowed(row, variant)
+        ]
         trading_days = int(
             con.execute(
-                "SELECT COUNT(DISTINCT date(observed_at)) FROM strategy_observations"
+                f"SELECT COUNT(DISTINCT date(observed_at)) FROM strategy_observations {where}",
+                sql_parameters,
             ).fetchone()[0]
         )
         observations = [
@@ -131,12 +157,14 @@ def run_momentum_backtest(
             observed_at = datetime.fromisoformat(observation[0])
             option_type = "CE" if observation[2] == "BULLISH" else "PE"
             contract = con.execute(
-                """SELECT token, lot_size, symbol FROM instruments
+                """SELECT token, lot_size, symbol, expiry FROM instruments
                    WHERE underlying='NIFTY' AND option_type=? AND expiry>=date(?)
                    ORDER BY expiry, ABS(strike-?) LIMIT 1""",
                 (option_type, observed_at.isoformat(), observation[1]),
             ).fetchone()
             if contract is None:
+                continue
+            if variant.exclude_expiry_day and contract[3] == observed_at.date().isoformat():
                 continue
             entry = con.execute(
                 """SELECT started_at, open FROM market_candles
@@ -150,14 +178,19 @@ def run_momentum_backtest(
             session_exit = datetime.combine(
                 observed_at.date(), force_exit, tzinfo=observed_at.tzinfo
             ).isoformat()
-            next_observed = min(
+            next_signal = (
                 observations[index + 1][0]
                 if index + 1 < len(observations)
-                else session_exit,
-                session_exit,
+                else session_exit
             )
+            next_observed = min(next_signal, session_exit)
+            timed_exit = False
+            if variant.maximum_hold_minutes:
+                hold_exit = observed_at + timedelta(minutes=variant.maximum_hold_minutes)
+                timed_exit = hold_exit.isoformat() < next_observed
+                next_observed = min(next_observed, hold_exit.isoformat())
             path = con.execute(
-                """SELECT started_at, open, low, close FROM market_candles
+                """SELECT started_at, open, high, low, close FROM market_candles
                    WHERE instrument_token=? AND started_at>=? AND started_at<=?
                    ORDER BY started_at""",
                 (contract[0], entry[0], next_observed),
@@ -168,24 +201,45 @@ def run_momentum_backtest(
             buy_fill = round(float(entry[1]) * (1 + slippage), 2)
             units = int(contract[1])
             fees = 2 * settings.paper_fee_per_order if settings else 0.0
-            risk_budget = settings.max_loss_per_trade * 0.8 if settings else float("inf")
+            risk_budget = (
+                settings.max_loss_per_trade * variant.stop_risk_fraction
+                if settings
+                else float("inf")
+            )
             stop_distance = (risk_budget - fees) / units if settings else float("inf")
             stop = round(buy_fill - stop_distance, 2) if settings else 0.0
             selected_exit = path[-1]
-            exit_price = float(selected_exit[3])
-            exit_reason = (
-                "signal-reversal"
-                if index + 1 < len(observations) and next_observed != session_exit
-                else "force-exit"
+            exit_price = float(selected_exit[4])
+            exit_reason = "max-hold" if timed_exit else (
+                "signal-reversal" if next_signal < session_exit else "force-exit"
             )
             if settings and stop > 0:
+                active_stop = stop
+                peak_price = buy_fill
                 for candle in path:
-                    if float(candle[1]) <= stop:
-                        selected_exit, exit_price, exit_reason = candle, float(candle[1]), "stop-gap"
+                    if float(candle[1]) <= active_stop:
+                        selected_exit, exit_price, exit_reason = (
+                            candle,
+                            float(candle[1]),
+                            "stop-gap",
+                        )
                         break
-                    if float(candle[2]) <= stop:
-                        selected_exit, exit_price, exit_reason = candle, stop, "stop"
+                    if float(candle[3]) <= active_stop:
+                        selected_exit, exit_price, exit_reason = candle, active_stop, "stop"
                         break
+                    target = (
+                        buy_fill * (1 + variant.target_return)
+                        if variant.target_return
+                        else None
+                    )
+                    if target and float(candle[2]) >= target:
+                        selected_exit, exit_price, exit_reason = candle, target, "target"
+                        break
+                    peak_price = max(peak_price, float(candle[2]))
+                    if variant.trailing_stop:
+                        active_stop = max(
+                            active_stop, peak_price * (1 - variant.trailing_stop)
+                        )
             sell_fill = round(exit_price * (1 - slippage), 2)
             gross = round((sell_fill - buy_fill) * units, 2)
             net = round(gross - fees, 2)
@@ -258,6 +312,35 @@ def run_momentum_backtest(
         tuple(trades),
         trading_days,
         gaps,
+    )
+
+
+def _observation_allowed(row: object, parameters: BacktestParameters) -> bool:
+    observed_at = datetime.fromisoformat(row[0])
+    signal = str(row[2])
+    rsi_value = float(row[3]) if row[3] is not None else None
+    atr_value = float(row[4]) if row[4] is not None else None
+    if parameters.entry_start and observed_at.time() < parameters.entry_start:
+        return False
+    if (
+        parameters.allowed_weekdays is not None
+        and observed_at.weekday() not in parameters.allowed_weekdays
+    ):
+        return False
+    if parameters.entry_end and observed_at.time() > parameters.entry_end:
+        return False
+    if parameters.minimum_atr is not None and (
+        atr_value is None or atr_value < parameters.minimum_atr
+    ):
+        return False
+    if signal == "BULLISH" and parameters.bullish_rsi_min is not None and (
+        rsi_value is None or rsi_value < parameters.bullish_rsi_min
+    ):
+        return False
+    return not (
+        signal == "BEARISH"
+        and parameters.bearish_rsi_max is not None
+        and (rsi_value is None or rsi_value > parameters.bearish_rsi_max)
     )
 
 

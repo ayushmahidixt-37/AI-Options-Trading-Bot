@@ -72,6 +72,39 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
         auth=auth(),
     )
     assert "Automatic paper entries enabled" in enabled.text
+    assert "Research workspace" in enabled.text
+    assert "Data &amp; operations" in enabled.text
+
+
+def test_strategy_validation_form_validates_ranges_and_exports(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+    invalid = client.post(
+        "/actions/strategy-validation",
+        data={
+            "development_start": "2026-08-01",
+            "development_end": "2026-08-10",
+            "validation_start": "2026-08-10",
+            "validation_end": "2026-08-15",
+            "test_start": "2026-08-16",
+            "test_end": "2026-08-20",
+        },
+        auth=auth(),
+    )
+    assert "non-overlapping chronological" in invalid.text
+    valid = client.post(
+        "/actions/strategy-validation",
+        data={
+            "development_start": "2026-08-01",
+            "development_end": "2026-08-05",
+            "validation_start": "2026-08-06",
+            "validation_end": "2026-08-10",
+            "test_start": "2026-08-11",
+            "test_end": "2026-08-15",
+        },
+        auth=auth(),
+    )
+    assert "Strategy validation completed" in valid.text
+    assert client.get("/validation/comparison.csv", auth=auth()).status_code == 200
 
 
 def test_web_health_and_scan_actions_are_safe(tmp_path: Path) -> None:

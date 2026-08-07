@@ -99,11 +99,38 @@ class MarketArchive:
                     saved_instruments INTEGER NOT NULL,
                     details TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS operational_state (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS candle_time_idx ON market_candles(started_at);
                 CREATE INDEX IF NOT EXISTS instrument_expiry_idx
                     ON instruments(underlying, expiry, strike);
                 """
             )
+
+    def set_operational_state(
+        self, key: str, value: object, observed_at: datetime
+    ) -> None:
+        with self.connect() as con:
+            con.execute(
+                """INSERT INTO operational_state(key, value, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value=excluded.value, updated_at=excluded.updated_at""",
+                (key, str(value), observed_at.isoformat()),
+            )
+
+    def operational_state(self) -> dict[str, dict[str, str]]:
+        with self.connect() as con:
+            rows = con.execute(
+                "SELECT key, value, updated_at FROM operational_state"
+            ).fetchall()
+        return {
+            str(row[0]): {"value": str(row[1]), "updated_at": str(row[2])}
+            for row in rows
+        }
 
     def save_candles(
         self,
@@ -367,3 +394,14 @@ class MarketArchive:
         with self.connect() as source, sqlite3.connect(destination) as backup:
             source.backup(backup)
         return destination
+
+    def rotate_backups(self, directory: str | Path, keep: int) -> int:
+        if keep < 1:
+            raise ValueError("keep must be positive")
+        folder = Path(directory)
+        backups = sorted(folder.glob("market-data-*.sqlite3"), reverse=True)
+        removed = 0
+        for path in backups[keep:]:
+            path.unlink(missing_ok=True)
+            removed += 1
+        return removed
