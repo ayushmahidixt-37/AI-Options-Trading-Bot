@@ -81,7 +81,10 @@ Do not paste server, GitHub, Angel One, Telegram, or TOTP secrets into chat.
 
 The credential loader accepts only the recognized names in
 `credentials.env.example`. The populated file must stay outside Git and should
-be readable only by root and the service group.
+be readable only by root and the service group. `UPSTOX_API_KEY`,
+`UPSTOX_API_SECRET`, and `UPSTOX_ACCESS_TOKEN` are recognized for the
+read-only historical-backtesting feature; they carry no order-placement
+capability.
 
 Previously committed credentials must be revoked and rotated. Removing secrets
 from the current revision does not erase them from Git history; clean the history
@@ -242,7 +245,27 @@ actions.py                 UI-safe paper action helpers
 web.py                     local password-protected paper dashboard
 service.py                 process lifecycle and single-instance lock
 execution/live_angel.py    preserved, independently gated future live adapter
+upstox_data.py             read-only Upstox historical/expired-option data client
+upstox_ingest.py           discovers and pulls Upstox candles into the archive
 ```
+
+## Upstox historical backtesting (read-only, in progress)
+
+A second, strictly read-only data source is being added to speed up strategy
+validation: Upstox's expired-instruments API can supply months of historical
+NIFTY option candles for offline replay, rather than waiting solely on
+forward-paper collection. Upstox is used only for historical data — it has no
+order-placement capability and is not a second trading broker.
+
+As of this batch, only the credentials/settings/client (`upstox_data.py`) and
+the storage/ingestion layer (`upstox_ingest.py`, plus an `open_interest`
+column and `save_upstox_candles()` in `market_archive.py`) exist, gated
+behind `UPSTOX_BACKTEST_ENABLED` (default `false`). There is no dashboard tab
+yet. Two things worth knowing before relying on this feature: Upstox's
+expiry-discovery endpoint only covers roughly the last 6 months, a hard
+platform limit independent of subscription tier; and Upstox access tokens
+are short-lived with no long-lived refresh grant, so `UPSTOX_ACCESS_TOKEN`
+needs periodic manual renewal.
 
 ## Tests
 

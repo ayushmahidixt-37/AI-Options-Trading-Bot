@@ -16,6 +16,9 @@ def test_safe_defaults_are_paper_only(tmp_path: Path) -> None:
     assert settings.max_lots_per_trade == 1
     assert settings.max_open_positions == 2
     assert settings.max_trades_per_day == 0
+    assert settings.upstox_enabled is False
+    assert settings.upstox_request_timeout_seconds == 10
+    assert settings.upstox_max_lookback_days == 180
 
 
 @pytest.mark.parametrize(

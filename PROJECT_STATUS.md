@@ -4,8 +4,11 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-07
-**Current phase:** Forward paper evidence collection and validation review
+**Last updated:** 2026-08-09
+**Current phase:** Forward paper evidence collection and validation review;
+Upstox historical-backtesting feature under construction (Batch 1 of 3:
+credentials/settings/client + storage/ingestion, tested locally, not yet
+merged to main)
 **Production status:** Not approved for live trading
 
 ## Objective
@@ -32,6 +35,9 @@ paper results are simulations and may not represent future results.
   disabling the toggle prevents new entries while preserving exit monitoring.
 - Never add a live-order call as an incidental part of another phase.
 - Never commit or print Angel, Telegram, password, PIN, or TOTP secrets.
+- Upstox is used only as a read-only historical-data source for offline
+  backtesting; it must never place orders and is not a second trading
+  broker. Never print or log an Upstox access token.
 
 ## What is implemented
 
@@ -113,6 +119,42 @@ paper results are simulations and may not represent future results.
   target, and trailing-stop variants without changing forward-paper settings.
 - A candidate is selected from validation data; only that candidate is evaluated
   on the untouched test range, with CSV comparison export.
+
+### Upstox historical backtesting — in progress (Batch 1 of 3)
+
+A second, strictly read-only data source is being added to speed up strategy
+validation beyond what forward-paper collection alone can provide. Upstox is
+data-only: it must never place orders and is not a second trading broker.
+
+- `UPSTOX_API_KEY`, `UPSTOX_API_SECRET`, `UPSTOX_ACCESS_TOKEN` are recognized
+  credential names (`credentials.py`); `UPSTOX_BACKTEST_ENABLED` (default
+  `false`), `UPSTOX_TIMEOUT_SECONDS`, and `UPSTOX_MAX_LOOKBACK_DAYS` (default
+  `180`) are new non-secret settings (`config.py`).
+- `upstox_data.py`: a thin, mockable read-only client (instrument search,
+  expiries, expired option contracts, expired historical candles, and the
+  free non-expired Historical Candle Data V3 endpoint for underlying spot
+  candles). Raises a clear error on an expired/invalid token or when an
+  endpoint requires the paid Upstox Plus tier.
+- `market_archive.py`: an idempotent migration adds a nullable
+  `open_interest` column to `market_candles`; a new `save_upstox_candles()`
+  method writes Upstox rows under `source="upstox"`, kept separate from the
+  always-running Angel `save_candles()` path.
+- `upstox_ingest.py`: discovers expired NIFTY option contracts for a
+  requested date range (near-ATM strike selection, chunked per-contract
+  requests, rate-limit pacing), pulls both option and underlying candles, and
+  records each run via the existing `collection_runs` table.
+- **Hard platform limit, not a budget/rate issue**: Upstox's expiry-discovery
+  endpoint only returns expiries from roughly the last 6 months, so this
+  feature cannot reach further back than that regardless of subscription
+  tier or request volume. `UPSTOX_MAX_LOOKBACK_DAYS` mirrors this ceiling so
+  requests fail fast with a clear message instead of a doomed round trip.
+- **Operational note**: Upstox access tokens are short-lived (typically
+  daily) with no long-lived refresh grant for this flow, unlike Angel's TOTP
+  login — expect to re-authorize manually on a recurring basis.
+- Not yet built: the backtest-from-raw-candles engine, deep-analysis/
+  suggestions layer, and the dashboard tab itself (planned as Batches 2 and
+  3). No dashboard surface exists yet; this batch is verified via `pytest`
+  and a manual scripted ingestion run only.
 
 ### Strategy research backlog — not active
 
@@ -224,6 +266,11 @@ the gate still does not approve or enable live trading.
 - SmartAPI availability, permissions, rate limits, and contract data remain
   external dependencies.
 - A successful backtest or paper period does not guarantee profitability.
+- Upstox's expiry-discovery endpoint only covers roughly the last 6 months;
+  historical backtesting through Upstox cannot reach further back than that
+  regardless of subscription tier. Upstox access tokens expire (typically
+  daily) and require manual re-authorization; there is no long-lived refresh
+  grant for this flow.
 
 ## Standard checks before committing
 
@@ -264,3 +311,9 @@ At the end of every development session, update this file when applicable:
 - The most valuable next activity is collecting complete forward paper sessions,
   preserving the SQLite archive, and reviewing Phase B only when every split has
   adequate low-gap option history.
+- Upstox historical-backtesting Batch 1 (credentials/settings/client plus
+  storage/ingestion) is implemented and locally verified (`pytest`, `ruff`,
+  `compileall`, a manual scripted ingestion smoke test) but not yet pushed to
+  main, pending explicit confirmation. No dashboard surface exists yet, and
+  `UPSTOX_BACKTEST_ENABLED` defaults to `false`, so this batch changes no
+  runtime behavior for existing forward-paper operation.
