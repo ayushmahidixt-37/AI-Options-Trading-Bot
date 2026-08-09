@@ -100,7 +100,13 @@ class UpstoxClient:
         url = f"{self._base_url}{path}"
         if params:
             url = f"{url}?{urllib.parse.urlencode(params)}"
-        status, body = self._transport("GET", url, self._headers(), self._timeout_seconds)
+        try:
+            status, body = self._transport("GET", url, self._headers(), self._timeout_seconds)
+        except OSError as exc:
+            # Covers DNS failures, refused/blocked connections, and timeouts —
+            # anything below the HTTP layer, which _default_transport does not
+            # itself convert into a (status, body) pair.
+            raise UpstoxDataError(f"Could not reach Upstox: {exc}") from exc
         if status == 401:
             raise UpstoxDataError(
                 "Upstox session expired or invalid — renew UPSTOX_ACCESS_TOKEN"

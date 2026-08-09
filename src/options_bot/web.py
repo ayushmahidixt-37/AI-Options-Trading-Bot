@@ -14,12 +14,16 @@ from fastapi.templating import Jinja2Templates
 from .actions import close_paper_position_action, run_health_action, run_paper_scan_action, status_snapshot
 from .backtest import BacktestResult, export_backtest_csv, run_momentum_backtest
 from .connections import ConnectionActionError, ConnectionManager, PaperTradeProposal
+from .credentials import load_credentials
 from .domain import PaperOrderRequest
 from .runner import build_application
 from .config import Settings
 from .health import healthcheck
 from .paper_monitor import PaperPositionMonitor
 from .risk import RiskRejected
+from .upstox_analysis import DeepAnalysisReport, generate_suggestions, run_deep_analysis
+from .upstox_data import UpstoxClient, UpstoxDataError
+from .upstox_ingest import IngestionSummary, pull_range
 from .validation import ValidationReport, export_validation_csv, run_strategy_validation
 from .readiness import (
     build_readiness_report,
@@ -29,6 +33,27 @@ from .readiness import (
 
 security = HTTPBasic()
 TEMPLATE_DIR = Path(__file__).with_name("templates")
+
+
+def _require_upstox_client(settings: Settings) -> UpstoxClient:
+    """Build a read-only Upstox client, or raise a clear, safe error.
+
+    Never used for orders: this only ever backs historical-data actions.
+    """
+    if not settings.upstox_enabled:
+        raise UpstoxDataError(
+            "Upstox backtesting is disabled. Set UPSTOX_BACKTEST_ENABLED=true to use this tab."
+        )
+    try:
+        credentials = load_credentials(settings.credentials_path)
+    except FileNotFoundError as exc:
+        raise UpstoxDataError(str(exc)) from exc
+    access_token = credentials.get("UPSTOX_ACCESS_TOKEN", "").strip()
+    if not access_token:
+        raise UpstoxDataError(
+            "Upstox credentials are incomplete. Set UPSTOX_ACCESS_TOKEN in credentials.env."
+        )
+    return UpstoxClient(access_token, timeout_seconds=settings.upstox_request_timeout_seconds)
 
 
 def create_web_app(
@@ -47,6 +72,8 @@ def create_web_app(
     latest_backtest: BacktestResult | None = None
     latest_proposal: PaperTradeProposal | None = None
     latest_validation: ValidationReport | None = None
+    latest_upstox_ingestion: IngestionSummary | None = None
+    latest_upstox_analysis: DeepAnalysisReport | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -130,6 +157,11 @@ def create_web_app(
             "trade_journal": application.ledger.trade_journal(25),
             "validation": latest_validation,
             "readiness": readiness,
+            "upstox_ingestion": latest_upstox_ingestion,
+            "upstox_analysis": latest_upstox_analysis,
+            "upstox_suggestions": (
+                generate_suggestions(latest_upstox_analysis) if latest_upstox_analysis else ()
+            ),
             "message": message,
             "ok": ok,
         }
@@ -154,6 +186,8 @@ def create_web_app(
             "auto-paper": "paper",
             "backtest": "research",
             "strategy-validation": "research",
+            "upstox-ingest": "backtesting-upstox",
+            "upstox-backtest": "backtesting-upstox",
             "angel-connect": "operations",
             "nifty-refresh": "operations",
             "instruments-refresh": "operations",
@@ -341,6 +375,87 @@ def create_web_app(
             raise HTTPException(status_code=404, detail="Run strategy validation first")
         target = settings.data_dir / "exports" / "strategy-validation.csv"
         export_validation_csv(latest_validation, target)
+        return FileResponse(target, filename=target.name, media_type="text/csv")
+
+    @app.post("/actions/upstox-ingest", response_class=HTMLResponse)
+    def run_upstox_ingest(
+        request: Request,
+        start_date: str = Form(""),
+        end_date: str = Form(""),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        nonlocal latest_upstox_ingestion
+        try:
+            client = _require_upstox_client(settings)
+            if not (start_date and end_date):
+                raise ValueError("Start and end dates are required")
+            start = date.fromisoformat(start_date)
+            end = date.fromisoformat(end_date)
+            if start > end:
+                raise ValueError("Start date must not be after end date")
+            latest_upstox_ingestion = pull_range(
+                client,
+                connections.archive,
+                start,
+                end,
+                max_lookback_days=settings.upstox_max_lookback_days,
+            )
+            warning_note = (
+                f"; {len(latest_upstox_ingestion.warnings)} warning(s)"
+                if latest_upstox_ingestion.warnings
+                else ""
+            )
+            message = (
+                f"Upstox ingestion complete: {latest_upstox_ingestion.candles_saved} candles, "
+                f"{latest_upstox_ingestion.contracts_pulled} contracts{warning_note}"
+            )
+            ok = True
+        except (UpstoxDataError, ValueError) as exc:
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
+        )
+
+    @app.post("/actions/upstox-backtest", response_class=HTMLResponse)
+    def run_upstox_backtest_action(
+        request: Request,
+        start_date: str = Form(""),
+        end_date: str = Form(""),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        nonlocal latest_upstox_analysis
+        try:
+            if not settings.upstox_enabled:
+                raise UpstoxDataError(
+                    "Upstox backtesting is disabled. Set UPSTOX_BACKTEST_ENABLED=true to use this tab."
+                )
+            start = date.fromisoformat(start_date) if start_date else None
+            end = date.fromisoformat(end_date) if end_date else None
+            if start and end and start > end:
+                raise ValueError("Start date must not be after end date")
+            latest_upstox_analysis = run_deep_analysis(
+                connections.archive, start=start, end=end, settings=settings
+            )
+            overall = latest_upstox_analysis.overall
+            message = "Upstox backtest completed" if overall.trades else overall.reason
+            ok = overall.trades > 0
+        except (UpstoxDataError, ValueError) as exc:
+            latest_upstox_analysis = None
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
+        )
+
+    @app.get("/upstox/trades.csv", response_class=FileResponse)
+    def download_upstox_backtest(_user: str = Depends(require_login)) -> FileResponse:
+        if latest_upstox_analysis is None or not latest_upstox_analysis.overall.trade_details:
+            raise HTTPException(status_code=404, detail="Run an Upstox backtest first")
+        target = settings.data_dir / "exports" / "upstox-backtest-trades.csv"
+        export_backtest_csv(latest_upstox_analysis.overall, target)
         return FileResponse(target, filename=target.name, media_type="text/csv")
 
     @app.post("/actions/readiness-review", response_class=HTMLResponse)

@@ -87,6 +87,7 @@
       <button class="tab" data-panel="overview" aria-selected="true">Overview</button>
       <button class="tab" data-panel="paper" aria-selected="false">Paper trading</button>
       <button class="tab" data-panel="research" aria-selected="false">Research</button>
+      <button class="tab" data-panel="backtesting-upstox" aria-selected="false">Historical backtest</button>
       <button class="tab" data-panel="operations" aria-selected="false">Data &amp; operations</button>
       <button class="tab" data-panel="readiness" aria-selected="false">Readiness review</button>
     </nav>
@@ -95,6 +96,7 @@
     {% include "partials/_overview.html" %}
     {% include "partials/_paper.html" %}
     {% include "partials/_research.html" %}
+    {% include "partials/_upstox_backtest.html" %}
     {% include "partials/_operations.html" %}
     {% include "partials/_readiness.html" %}
   </main>

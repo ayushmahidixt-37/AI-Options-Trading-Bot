@@ -96,6 +96,15 @@ def test_plus_subscription_required_error_is_explicit() -> None:
         client.get_expiries("NSE_INDEX|Nifty 50")
 
 
+def test_network_failure_raises_a_friendly_error_not_a_raw_exception() -> None:
+    def failing_transport(method, url, headers, timeout_seconds):
+        raise OSError("Tunnel connection failed: 403 Forbidden")
+
+    client = UpstoxClient("test-token", transport=failing_transport)
+    with pytest.raises(UpstoxDataError, match="Could not reach Upstox"):
+        client.search_instruments("NIFTY")
+
+
 def test_malformed_json_raises() -> None:
     transport = _transport(200, "not-json")
     client = UpstoxClient("test-token", transport=transport)

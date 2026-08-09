@@ -259,16 +259,15 @@ NIFTY option candles for offline replay, rather than waiting solely on
 forward-paper collection. Upstox is used only for historical data — it has no
 order-placement capability and is not a second trading broker.
 
-As of this batch, the credentials/settings/client (`upstox_data.py`), the
-storage/ingestion layer (`upstox_ingest.py`), and a backtest-from-raw-candles
-engine plus explainable analysis layer (`upstox_backtest.py`,
-`upstox_analysis.py`) all exist, gated behind `UPSTOX_BACKTEST_ENABLED`
-(default `false`). There is no dashboard tab yet — everything is exercised
-through `pytest` and manual scripts only. Two things worth knowing before
-relying on this feature: Upstox's expiry-discovery endpoint only covers
-roughly the last 6 months, a hard platform limit independent of subscription
-tier; and Upstox access tokens are short-lived with no long-lived refresh
-grant, so `UPSTOX_ACCESS_TOKEN` needs periodic manual renewal.
+The feature is now complete end-to-end, gated behind `UPSTOX_BACKTEST_ENABLED`
+(default `false`): a new **Historical backtest** dashboard tab lets you pull
+Upstox data for a date range, run a backtest over it, and see the deep
+analysis breakdowns and suggestions — all from the browser. Two things worth
+knowing before relying on this feature: Upstox's expiry-discovery endpoint
+only covers roughly the last 6 months, a hard platform limit independent of
+subscription tier; and Upstox access tokens are short-lived with no
+long-lived refresh grant, so `UPSTOX_ACCESS_TOKEN` needs periodic manual
+renewal.
 
 `upstox_backtest.py` never touches `strategy_observations` — it walks raw
 Upstox candles forward one at a time (no look-ahead) and generates signals
@@ -283,6 +282,14 @@ both compared groups have at least 20 trades and a real (not noise-level)
 win-rate gap. A suggestion is a hypothesis to manually retest through the
 existing development/validation/test split, not a conclusion to trust
 outright.
+
+Every dashboard action fails with a clear on-page message — never a stack
+trace — when the feature is disabled, credentials are missing, or Upstox
+itself is unreachable (including network-level failures like a blocked or
+refused connection, not just HTTP error responses). `run_strategy_validation()`
+also accepts an injectable `runner` parameter so Upstox-sourced strategy
+variants can go through the same development/validation/untouched-test
+selection discipline as the existing Angel-sourced ones.
 
 ## Tests
 
