@@ -263,6 +263,16 @@ def run_momentum_backtest(
                 )
             )
 
+    return build_backtest_result(trades, archive, settings, trading_days)
+
+
+def build_backtest_result(
+    trades: list[OptionBacktestTrade],
+    archive: MarketArchive,
+    settings: Settings | None,
+    trading_days: int,
+) -> BacktestResult:
+    """Aggregate trades into a ``BacktestResult``, shared by every replay engine."""
     if not trades:
         return BacktestResult(
             "INSUFFICIENT DATA",

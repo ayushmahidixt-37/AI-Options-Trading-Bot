@@ -247,6 +247,8 @@ service.py                 process lifecycle and single-instance lock
 execution/live_angel.py    preserved, independently gated future live adapter
 upstox_data.py             read-only Upstox historical/expired-option data client
 upstox_ingest.py           discovers and pulls Upstox candles into the archive
+upstox_backtest.py         no-lookahead replay of Upstox candles, no strategy_observations
+upstox_analysis.py         explainable breakdowns and traceable suggestions, no model
 ```
 
 ## Upstox historical backtesting (read-only, in progress)
@@ -257,15 +259,30 @@ NIFTY option candles for offline replay, rather than waiting solely on
 forward-paper collection. Upstox is used only for historical data — it has no
 order-placement capability and is not a second trading broker.
 
-As of this batch, only the credentials/settings/client (`upstox_data.py`) and
-the storage/ingestion layer (`upstox_ingest.py`, plus an `open_interest`
-column and `save_upstox_candles()` in `market_archive.py`) exist, gated
-behind `UPSTOX_BACKTEST_ENABLED` (default `false`). There is no dashboard tab
-yet. Two things worth knowing before relying on this feature: Upstox's
-expiry-discovery endpoint only covers roughly the last 6 months, a hard
-platform limit independent of subscription tier; and Upstox access tokens
-are short-lived with no long-lived refresh grant, so `UPSTOX_ACCESS_TOKEN`
-needs periodic manual renewal.
+As of this batch, the credentials/settings/client (`upstox_data.py`), the
+storage/ingestion layer (`upstox_ingest.py`), and a backtest-from-raw-candles
+engine plus explainable analysis layer (`upstox_backtest.py`,
+`upstox_analysis.py`) all exist, gated behind `UPSTOX_BACKTEST_ENABLED`
+(default `false`). There is no dashboard tab yet — everything is exercised
+through `pytest` and manual scripts only. Two things worth knowing before
+relying on this feature: Upstox's expiry-discovery endpoint only covers
+roughly the last 6 months, a hard platform limit independent of subscription
+tier; and Upstox access tokens are short-lived with no long-lived refresh
+grant, so `UPSTOX_ACCESS_TOKEN` needs periodic manual renewal.
+
+`upstox_backtest.py` never touches `strategy_observations` — it walks raw
+Upstox candles forward one at a time (no look-ahead) and generates signals
+in memory, then reuses the same conservative entry/exit/fee logic as the
+existing offline backtest. Every query is restricted to `source='upstox'`
+rows, so Angel- and Upstox-sourced data in the same archive can never be
+cross-matched. `upstox_analysis.py` adds explainable, aggregate-only
+breakdowns (time-of-day, day-of-week, expiry-day, volatility regime, and
+per-strategy-variant comparison) and a `generate_suggestions()` function that
+emits plain comparative statements — never a fitted model — and only when
+both compared groups have at least 20 trades and a real (not noise-level)
+win-rate gap. A suggestion is a hypothesis to manually retest through the
+existing development/validation/test split, not a conclusion to trust
+outright.
 
 ## Tests
 

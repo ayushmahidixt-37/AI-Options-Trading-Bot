@@ -6,9 +6,9 @@
 
 **Last updated:** 2026-08-09
 **Current phase:** Forward paper evidence collection and validation review;
-Upstox historical-backtesting feature under construction (Batch 1 of 3:
-credentials/settings/client + storage/ingestion, tested locally, not yet
-merged to main)
+Upstox historical-backtesting feature under construction (Batch 2 of 3:
+backtest-from-raw-candles engine + deep analysis/suggestions, tested locally,
+not yet pushed)
 **Production status:** Not approved for live trading
 
 ## Objective
@@ -120,7 +120,7 @@ paper results are simulations and may not represent future results.
 - A candidate is selected from validation data; only that candidate is evaluated
   on the untouched test range, with CSV comparison export.
 
-### Upstox historical backtesting — in progress (Batch 1 of 3)
+### Upstox historical backtesting — in progress (Batch 2 of 3)
 
 A second, strictly read-only data source is being added to speed up strategy
 validation beyond what forward-paper collection alone can provide. Upstox is
@@ -151,10 +151,29 @@ data-only: it must never place orders and is not a second trading broker.
 - **Operational note**: Upstox access tokens are short-lived (typically
   daily) with no long-lived refresh grant for this flow, unlike Angel's TOTP
   login — expect to re-authorize manually on a recurring basis.
-- Not yet built: the backtest-from-raw-candles engine, deep-analysis/
-  suggestions layer, and the dashboard tab itself (planned as Batches 2 and
-  3). No dashboard surface exists yet; this batch is verified via `pytest`
-  and a manual scripted ingestion run only.
+- `upstox_backtest.py`: a walk-forward, no-lookahead replay
+  (`generate_signals_from_candles`) that generates signals directly from raw
+  Upstox underlying candles — no `strategy_observations` writes, kept fully
+  separate from the in-production Angel-observation-based backtest.
+  `run_upstox_backtest()` reuses the same conservative entry/exit/fee logic
+  and restricts every `market_candles`/`instruments` lookup to
+  `source='upstox'` so Angel and Upstox data can never be cross-matched in
+  one run (verified by a dedicated test). Returns the existing
+  `BacktestResult`/`OptionBacktestTrade` types unchanged.
+- `upstox_analysis.py`: explainable, aggregate-only breakdowns (time-of-day,
+  day-of-week, expiry-day, volatility regime, per-variant comparison using
+  the existing `validation.py` strategy variants) and `generate_suggestions()`,
+  which emits plain comparative statements only when both compared buckets
+  have at least 20 supporting trades and the win-rate gap exceeds a 10
+  percentage-point noise floor. No model, no fitting — every suggestion is a
+  hypothesis mined from historical data, not a proven edge, and is meant to
+  be manually retested through the existing development/validation/test
+  split discipline, never tuned against the same data it was mined from.
+- Not yet built: the dashboard tab itself (planned as Batch 3), and the
+  injectable-runner change to `validation.py` that would formally route
+  Upstox-sourced variants through the three-way split. No dashboard surface
+  exists yet; this batch is verified via `pytest` and a manual scripted
+  ingest→backtest→analysis smoke test only.
 
 ### Strategy research backlog — not active
 
@@ -312,8 +331,12 @@ At the end of every development session, update this file when applicable:
   preserving the SQLite archive, and reviewing Phase B only when every split has
   adequate low-gap option history.
 - Upstox historical-backtesting Batch 1 (credentials/settings/client plus
-  storage/ingestion) is implemented and locally verified (`pytest`, `ruff`,
-  `compileall`, a manual scripted ingestion smoke test) but not yet pushed to
-  main, pending explicit confirmation. No dashboard surface exists yet, and
-  `UPSTOX_BACKTEST_ENABLED` defaults to `false`, so this batch changes no
-  runtime behavior for existing forward-paper operation.
+  storage/ingestion) shipped and was pulled to the user's own device for a
+  boot-only smoke test (no dashboard changes to see yet).
+- Upstox historical-backtesting Batch 2 (backtest-from-raw-candles engine
+  plus deep analysis/suggestions) is implemented and locally verified
+  (`pytest`, `ruff`, `compileall`, a manual scripted ingest→backtest→analysis
+  smoke test) but not yet pushed, pending explicit confirmation. No
+  dashboard surface exists yet, and `UPSTOX_BACKTEST_ENABLED` defaults to
+  `false`, so this batch changes no runtime behavior for existing
+  forward-paper operation.
