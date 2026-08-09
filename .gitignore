@@ -18,3 +18,9 @@ trade_logs/
 __pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Local virtual environments and build artifacts
+.venv/
+venv/
+build/
+*.egg-info/
