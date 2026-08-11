@@ -6,11 +6,12 @@
 
 **Last updated:** 2026-08-11
 **Current phase:** Forward paper evidence collection and validation review;
-Upstox historical-backtesting feature complete and merged to `main`. Real
-device (Termux) confirmed the dashboard tab works; a Cloudflare bot-block on
-the Upstox client (HTTP 403 error 1010, caused by a missing User-Agent
-header) was found and fixed. A real multi-month data pull is still pending
-the user's own Upstox Plus subscription/access token.
+Upstox historical-backtesting feature complete and merged to `main`. Two
+real-device (Termux) findings have been fixed: a Cloudflare bot-block (HTTP
+403 error 1010, missing User-Agent) and a contract field-name mismatch
+(`KeyError: 'expired_instrument_key'`) caused by Upstox's own inconsistent
+documentation. A real multi-month data pull is still pending the user's own
+Upstox Plus subscription/access token.
 **Production status:** Not approved for live trading
 
 ## Objective
@@ -199,9 +200,22 @@ data-only: it must never place orders and is not a second trading broker.
   "blocked access based on your browser's signature") because the client
   sent no `User-Agent` header, so Python's default (`Python-urllib/...`)
   was flagged as a bot. Fixed by sending a standard browser-style
-  `User-Agent`/`Accept-Language`, covered by a regression test. A real
-  multi-month pull against live Upstox data has still not been run — that
-  requires the user's own Upstox Plus subscription and access token.
+  `User-Agent`/`Accept-Language`, covered by a regression test.
+- **Second real-device finding**: past the Cloudflare block, ingestion
+  crashed with `KeyError: 'expired_instrument_key'`. Upstox's own docs are
+  internally inconsistent about this field's name — the "Backtesting" guide
+  calls it `expired_instrument_key`, but the confirmed Expired Future
+  Contracts example response names it `instrument_key`, and real Expired
+  Option Contracts responses use `instrument_key` too. `plan_ingestion` now
+  accepts either name (and similarly for `strike_price`/`strike` and
+  `instrument_type`/`option_type`), and raises a clear diagnostic error
+  (listing the actual fields present) instead of a raw `KeyError` if a
+  future response shape doesn't match either name — covered by regression
+  tests for both the fallback and the diagnostic-error path.
+- A real multi-month pull against live Upstox data has still not been
+  completed — that requires the user's own Upstox Plus subscription and
+  enough real testing time; the connection and discovery steps are now
+  confirmed working end-to-end on a real device, though.
 
 ### Strategy research backlog — not active
 
@@ -365,8 +379,13 @@ At the end of every development session, update this file when applicable:
   changes runtime behavior for existing forward-paper operation unless
   explicitly turned on.
 - Confirmed working on a real Termux device: the dashboard tab renders and
-  the ingest action reaches Upstox. A Cloudflare bot-block (HTTP 403, error
-  1010) caused by a missing `User-Agent` header was found this way and
-  fixed, merged separately. The Upstox historical-backtesting feature is now
-  feature-complete end-to-end, pending the user's own Upstox Plus
-  subscription/access token for a real multi-month data pull.
+  the ingest action reaches Upstox. Two real-device-only issues were found
+  and fixed, each merged separately: a Cloudflare bot-block (HTTP 403, error
+  1010) caused by a missing `User-Agent` header, and a `KeyError` from
+  Upstox's expired-option-contract responses using field name
+  `instrument_key` where their own docs inconsistently say
+  `expired_instrument_key` — the client now accepts either. The Upstox
+  historical-backtesting feature is feature-complete end-to-end and its
+  connection/discovery steps are confirmed live; a real multi-month data
+  pull is still pending the user's own Upstox Plus subscription/access
+  token and testing time.
