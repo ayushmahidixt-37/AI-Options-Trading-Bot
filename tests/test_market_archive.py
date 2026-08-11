@@ -184,6 +184,52 @@ def test_upstox_and_angel_candles_coexist_without_collision(tmp_path: Path) -> N
     assert sources == {"angel-one", "upstox"}
 
 
+def test_has_upstox_candles_reports_presence_by_token_and_range(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    started = datetime(2026, 7, 3, 9, 15, tzinfo=IST)
+    store.save_upstox_candles(
+        [UpstoxCandle("Nifty 50", started, 100, 103, 99, 102)],
+        token="NSE_INDEX|Nifty 50",
+        exchange="NSE_INDEX",
+        timeframe="FIVE_MINUTE",
+        collected_at=started,
+    )
+
+    assert store.has_upstox_candles("NSE_INDEX|Nifty 50", date(2026, 7, 1), date(2026, 7, 7))
+    assert not store.has_upstox_candles("NSE_INDEX|Nifty 50", date(2026, 6, 1), date(2026, 6, 30))
+    assert not store.has_upstox_candles("NSE_FO|999|31-12-2026", date(2026, 7, 1), date(2026, 7, 7))
+
+
+def test_upstox_coverage_ranges_groups_contiguous_days(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    token = "NSE_INDEX|Nifty 50"
+
+    def seed(day: date) -> None:
+        started = datetime(day.year, day.month, day.day, 9, 15, tzinfo=IST)
+        store.save_upstox_candles(
+            [UpstoxCandle("Nifty 50", started, 100, 103, 99, 102)],
+            token=token,
+            exchange="NSE_INDEX",
+            timeframe="FIVE_MINUTE",
+            collected_at=started,
+        )
+
+    for day in (date(2026, 7, 1), date(2026, 7, 2), date(2026, 7, 3)):
+        seed(day)
+    for day in (date(2026, 7, 10), date(2026, 7, 11)):
+        seed(day)
+
+    assert store.upstox_coverage_ranges(token) == [
+        (date(2026, 7, 1), date(2026, 7, 3)),
+        (date(2026, 7, 10), date(2026, 7, 11)),
+    ]
+
+
+def test_upstox_coverage_ranges_empty_when_nothing_archived(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    assert store.upstox_coverage_ranges("NSE_INDEX|Nifty 50") == []
+
+
 def test_operational_state_and_backup_rotation_are_durable(tmp_path: Path) -> None:
     store = archive(tmp_path)
     now = datetime(2026, 8, 7, 10, 0, tzinfo=IST)

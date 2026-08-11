@@ -12,6 +12,7 @@ from options_bot.strategy import Direction, Signal
 from options_bot.upstox_analysis import (
     DeepAnalysisReport,
     TradeBreakdown,
+    _highlight,
     generate_suggestions,
     run_deep_analysis,
 )
@@ -70,6 +71,42 @@ def test_suggestion_text_matches_manual_arithmetic() -> None:
     assert "80.0% over 25 trades" in suggestion.evidence
     assert "50.0% over 30 trades" in suggestion.evidence
     assert suggestion.supporting_trades == 55
+
+
+def test_highlight_appears_from_a_tiny_sample_and_is_marked_preliminary() -> None:
+    breakdown = (_breakdown("Morning", 2, 1.0), _breakdown("Afternoon", 1, 0.0))
+
+    highlight = _highlight("time of day", breakdown, minimum_sample=20)
+
+    assert highlight is not None
+    assert highlight.dimension == "time of day"
+    assert "Morning" in highlight.headline
+    assert "Afternoon" in highlight.headline
+    assert highlight.preliminary is True
+
+
+def test_highlight_is_not_preliminary_once_both_sides_clear_the_sample_bar() -> None:
+    breakdown = (_breakdown("Morning", 25, 0.8), _breakdown("Afternoon", 30, 0.5))
+
+    highlight = _highlight("time of day", breakdown, minimum_sample=20)
+
+    assert highlight is not None
+    assert highlight.preliminary is False
+
+
+def test_highlight_is_none_with_fewer_than_two_eligible_groups() -> None:
+    assert _highlight("time of day", (_breakdown("Morning", 5, 0.8),), minimum_sample=20) is None
+    assert _highlight("time of day", (), minimum_sample=20) is None
+
+
+def test_highlight_is_none_when_only_one_group_has_trades() -> None:
+    breakdown = (_breakdown("Morning", 5, 0.8), _breakdown("Afternoon", 0, None))
+    assert _highlight("time of day", breakdown, minimum_sample=20) is None
+
+
+def test_report_highlights_field_defaults_to_empty_tuple() -> None:
+    report = _report()
+    assert report.highlights == ()
 
 
 def test_no_suggestion_when_only_one_bucket_is_eligible() -> None:

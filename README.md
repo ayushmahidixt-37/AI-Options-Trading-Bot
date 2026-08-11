@@ -291,6 +291,17 @@ also accepts an injectable `runner` parameter so Upstox-sourced strategy
 variants can go through the same development/validation/untouched-test
 selection discipline as the existing Angel-sourced ones.
 
+Ingestion is coverage-aware: before pulling, the tab shows which date
+ranges are already archived, and `pull_range()` skips any date-chunk
+already saved for a token instead of re-calling Upstox for it — a
+"Re-fetch even if already cached" checkbox bypasses this when you
+deliberately want to. The deep-analysis view also shows a "Highlights"
+card ahead of the raw breakdown tables: a plain-language best/worst group
+per dimension, generated from any sample size (unlike Suggestions) and
+clearly labeled "Preliminary" whenever either side is below the same
+20-trade threshold Suggestions requires — so there's always visible
+feedback on what's going well or badly, not just once 20+ trades exist.
+
 ## Tests
 
 ```bash

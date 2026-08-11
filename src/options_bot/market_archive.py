@@ -460,6 +460,48 @@ class MarketArchive:
             for row in rows
         ]
 
+    def has_upstox_candles(self, token: str, start: date, end: date) -> bool:
+        """Whether any Upstox-sourced candle already exists for a token in [start, end].
+
+        Used to skip a redundant Upstox API call for data already archived,
+        not to prove the range is gap-free — that's a coarser, cheaper check
+        deliberately traded off against always re-fetching.
+        """
+        with self.connect() as con:
+            row = con.execute(
+                """SELECT 1 FROM market_candles
+                   WHERE instrument_token=? AND source='upstox'
+                     AND date(started_at)>=? AND date(started_at)<=? LIMIT 1""",
+                (token, start.isoformat(), end.isoformat()),
+            ).fetchone()
+        return row is not None
+
+    def upstox_coverage_ranges(self, underlying_key: str) -> list[tuple[date, date]]:
+        """Contiguous date ranges already archived for the Upstox underlying candles.
+
+        Used to show what's already backtestable without pulling anything new.
+        """
+        with self.connect() as con:
+            rows = con.execute(
+                """SELECT DISTINCT date(started_at) FROM market_candles
+                   WHERE instrument_token=? AND source='upstox' ORDER BY date(started_at)""",
+                (underlying_key,),
+            ).fetchall()
+        days = [date.fromisoformat(row[0]) for row in rows]
+        ranges: list[tuple[date, date]] = []
+        range_start: date | None = None
+        previous: date | None = None
+        for day in days:
+            if range_start is None:
+                range_start = day
+            elif (day - previous).days > 1:
+                ranges.append((range_start, previous))
+                range_start = day
+            previous = day
+        if range_start is not None and previous is not None:
+            ranges.append((range_start, previous))
+        return ranges
+
     def export_candles_csv(self, target: str | Path) -> Path:
         destination = Path(target)
         destination.parent.mkdir(parents=True, exist_ok=True)

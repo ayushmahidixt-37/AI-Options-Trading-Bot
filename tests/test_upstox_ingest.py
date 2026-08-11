@@ -186,6 +186,7 @@ def test_pull_range_writes_candles_and_is_idempotent(tmp_path: Path) -> None:
     assert summary.instruments_saved == 2
     assert summary.warnings == ()
 
+    calls_before_rerun = len(client.candle_calls)
     rerun = pull_range(
         client,
         store,
@@ -196,9 +197,32 @@ def test_pull_range_writes_candles_and_is_idempotent(tmp_path: Path) -> None:
         rate_limiter=RateLimiter(min_interval_seconds=0),
     )
     assert rerun.candles_saved == 0  # duplicate-safe rerun
+    assert rerun.chunks_skipped_cached > 0
+    # Skipped chunks must mean no API call was made at all, not just a no-op write.
+    assert len(client.candle_calls) == calls_before_rerun
 
     stats = store.stats()
     assert stats.candle_count > 0
+
+
+def test_pull_range_force_refetch_bypasses_the_cache_skip(tmp_path: Path) -> None:
+    store = _archive(tmp_path)
+    client = FakeClient()
+    kwargs = dict(
+        max_lookback_days=180,
+        observed_at=datetime(2025, 4, 25, 10, 0),
+        rate_limiter=RateLimiter(min_interval_seconds=0),
+    )
+
+    pull_range(client, store, date(2025, 4, 20), date(2025, 4, 24), **kwargs)
+    calls_before_rerun = len(client.candle_calls)
+
+    forced = pull_range(
+        client, store, date(2025, 4, 20), date(2025, 4, 24), force_refetch=True, **kwargs
+    )
+
+    assert forced.chunks_skipped_cached == 0
+    assert len(client.candle_calls) > calls_before_rerun
 
 
 def test_pull_range_records_a_collection_run(tmp_path: Path) -> None:

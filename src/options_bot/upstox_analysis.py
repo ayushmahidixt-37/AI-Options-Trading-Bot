@@ -43,6 +43,23 @@ class VariantComparison:
 
 
 @dataclass(frozen=True)
+class Highlight:
+    """A plain best/worst comparison shown regardless of sample size.
+
+    Unlike ``Suggestion``, this has no minimum-sample gate — it exists to
+    give visible, user-facing feedback even from a tiny early backtest.
+    ``preliminary`` is set whenever either side is below the same
+    minimum-sample threshold ``Suggestion`` requires, so the UI can label it
+    clearly as directional/unproven rather than a real finding.
+    """
+
+    dimension: str
+    headline: str
+    evidence: str
+    preliminary: bool
+
+
+@dataclass(frozen=True)
 class DeepAnalysisReport:
     overall: BacktestResult
     time_of_day: tuple[TradeBreakdown, ...]
@@ -50,6 +67,7 @@ class DeepAnalysisReport:
     expiry_day: tuple[TradeBreakdown, ...]
     volatility_regime: tuple[TradeBreakdown, ...]
     variants: tuple[VariantComparison, ...]
+    highlights: tuple[Highlight, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -206,6 +224,30 @@ def _volatility_regime_breakdown(
     )
 
 
+def _highlight(
+    dimension: str, breakdown: tuple[TradeBreakdown, ...], minimum_sample: int
+) -> Highlight | None:
+    """Best/worst group by win rate, shown even below the Suggestion sample threshold."""
+    eligible = [item for item in breakdown if item.trades > 0 and item.win_rate is not None]
+    if len(eligible) < 2:
+        return None
+    best = max(eligible, key=lambda item: item.win_rate)
+    worst = min(eligible, key=lambda item: item.win_rate)
+    if best.label == worst.label:
+        return None
+    gap_pp = (best.win_rate - worst.win_rate) * 100
+    return Highlight(
+        dimension=dimension,
+        headline=f"By {dimension}: '{best.label}' is doing best so far, '{worst.label}' worst.",
+        evidence=(
+            f"'{best.label}': {best.win_rate * 100:.1f}% win rate over {best.trades} trades. "
+            f"'{worst.label}': {worst.win_rate * 100:.1f}% over {worst.trades} trades "
+            f"(gap {gap_pp:.1f}pp)."
+        ),
+        preliminary=min(best.trades, worst.trades) < minimum_sample,
+    )
+
+
 def run_deep_analysis(
     archive: MarketArchive,
     strategy: MomentumStrategy | None = None,
@@ -215,6 +257,7 @@ def run_deep_analysis(
     variants: tuple[BacktestParameters, ...] = STRATEGY_VARIANTS,
     underlying_key: str = NIFTY_UNDERLYING_KEY,
     timeframe: str = "FIVE_MINUTE",
+    minimum_sample: int = DEFAULT_MINIMUM_SAMPLE,
 ) -> DeepAnalysisReport:
     """Run the baseline Upstox backtest plus explainable statistical breakdowns."""
     strategy = strategy or MomentumStrategy()
@@ -227,12 +270,27 @@ def run_deep_analysis(
     entry_start = settings.entry_start if settings else time(9, 15)
     entry_cutoff = settings.entry_cutoff if settings else time(15, 20)
 
+    time_of_day = _time_of_day_breakdown(trades, entry_start, entry_cutoff)
+    day_of_week = _day_of_week_breakdown(trades)
+    expiry_day = _expiry_day_breakdown(trades, archive)
+    volatility_regime = _volatility_regime_breakdown(trades, atr_by_signal_at)
+    highlights = tuple(
+        highlight
+        for highlight in (
+            _highlight("time of day", time_of_day, minimum_sample),
+            _highlight("day of week", day_of_week, minimum_sample),
+            _highlight("expiry-day status", expiry_day, minimum_sample),
+            _highlight("volatility regime", volatility_regime, minimum_sample),
+        )
+        if highlight is not None
+    )
+
     return DeepAnalysisReport(
         overall=overall,
-        time_of_day=_time_of_day_breakdown(trades, entry_start, entry_cutoff),
-        day_of_week=_day_of_week_breakdown(trades),
-        expiry_day=_expiry_day_breakdown(trades, archive),
-        volatility_regime=_volatility_regime_breakdown(trades, atr_by_signal_at),
+        time_of_day=time_of_day,
+        day_of_week=day_of_week,
+        expiry_day=expiry_day,
+        volatility_regime=volatility_regime,
         variants=tuple(
             VariantComparison(
                 variant.name,
@@ -242,6 +300,7 @@ def run_deep_analysis(
             )
             for variant in variants
         ),
+        highlights=highlights,
     )
 
 

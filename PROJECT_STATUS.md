@@ -10,8 +10,12 @@ Upstox historical-backtesting feature complete and merged to `main`. Two
 real-device (Termux) findings have been fixed: a Cloudflare bot-block (HTTP
 403 error 1010, missing User-Agent) and a contract field-name mismatch
 (`KeyError: 'expired_instrument_key'`) caused by Upstox's own inconsistent
-documentation. A real multi-month data pull is still pending the user's own
-Upstox Plus subscription/access token.
+documentation. Ingestion now tracks archive coverage and skips already-
+fetched date ranges automatically, and the deep-analysis view now surfaces
+plain-language best/worst highlights (even from a small sample, clearly
+marked preliminary) alongside the existing gated Suggestions. A real
+multi-month data pull is still pending the user's own Upstox Plus
+subscription/access token.
 **Production status:** Not approved for live trading
 
 ## Objective
@@ -216,6 +220,21 @@ data-only: it must never place orders and is not a second trading broker.
   completed — that requires the user's own Upstox Plus subscription and
   enough real testing time; the connection and discovery steps are now
   confirmed working end-to-end on a real device, though.
+- **Ingestion tracks archive coverage and skips already-fetched data.**
+  `MarketArchive.has_upstox_candles()`/`upstox_coverage_ranges()` let
+  `pull_range()` skip any date-chunk already archived for a token instead of
+  re-calling Upstox for it (an explicit `force_refetch` checkbox on the tab
+  bypasses this when needed). The "Pull historical data" card now shows
+  which date ranges are already available before you pull anything, and the
+  ingestion result message reports how many chunks were skipped as
+  already-cached.
+- **Deep analysis now leads with plain-language highlights.** A new
+  "Highlights" card shows the best/worst-performing group per dimension
+  (time-of-day, day-of-week, expiry-day, volatility) from *any* sample
+  size, clearly labeled "Preliminary" when either side is below the same
+  20-trade threshold the formal Suggestions section requires. This answers
+  "what's going well/badly" even from a single small backtest, while the
+  existing Suggestions section stays statistically gated and unchanged.
 
 ### Strategy research backlog — not active
 
@@ -389,3 +408,8 @@ At the end of every development session, update this file when applicable:
   connection/discovery steps are confirmed live; a real multi-month data
   pull is still pending the user's own Upstox Plus subscription/access
   token and testing time.
+- Added coverage-aware ingestion (skip already-fetched date ranges unless
+  explicitly forced) and plain-language "Highlights" alongside the existing
+  gated Suggestions, in response to direct user feedback that repeat pulls
+  wasted API calls and that the analysis view gave no visible feedback
+  until 20+ trades accumulated.
