@@ -350,6 +350,16 @@ def format_analysis_summary(report: DeepAnalysisReport) -> str:
         f"Net P&L: {report.overall.net_pnl:.2f} | "
         f"Drawdown: {report.overall.max_drawdown:.2f}"
     )
+    return_text = (
+        f"{report.overall.return_on_capital_pct:.1f}%"
+        if report.overall.return_on_capital_pct is not None
+        else "n/a"
+    )
+    lines.append(
+        f"Capital deployed: {report.overall.capital_deployed_total:.2f} total, "
+        f"{report.overall.capital_deployed_average:.2f} avg/trade | "
+        f"Return on capital: {return_text}"
+    )
     lines.append("")
 
     lines.extend(_format_breakdown_section("BY TIME OF DAY", report.time_of_day))

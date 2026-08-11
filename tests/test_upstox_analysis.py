@@ -253,6 +253,8 @@ def test_format_analysis_summary_includes_period_and_overall_stats() -> None:
     assert "Trades: 2" in summary
     assert "Morning: 2 trades, 50.0% win rate" in summary
     assert "Baseline: 2 trades, net P&L 50.00" in summary
+    assert "Capital deployed: 15000.00 total, 7500.00 avg/trade" in summary
+    assert "Return on capital: 0.3%" in summary
     assert "[PRELIMINARY]" in summary
     assert "evidence text" in summary
     assert "CAUTION" in summary

@@ -260,6 +260,20 @@ data-only: it must never place orders and is not a second trading broker.
   comparison and the "Copy analysis for Claude" export, for diagnosing
   whether a strategy's real signal quality is being masked by an
   over-tight stop before drawing conclusions from win rate alone.
+- **Capital deployed and return on capital now shown alongside P&L and
+  drawdown.** `BacktestResult` gained three read-only properties —
+  `capital_deployed_total` (sum of entry premium across all trades),
+  `capital_deployed_average` (per-trade mean), and `return_on_capital_pct`
+  (net P&L as a percentage of total capital deployed) — computed purely
+  from already-recorded `trade_details`, no new stored fields or analysis
+  path. Shown on both the Angel-sourced offline-backtest card and the
+  Upstox-backtest card, and in the "Copy analysis for Claude" export. Added
+  in response to a question about what "drawdown" means and a request to
+  see total capital used, since a raw rupee P&L number is hard to judge
+  without knowing how much capital produced it. Note this is *turnover*
+  capital, not simultaneous margin — positions are opened one at a time,
+  never overlapping, so this is the sum of money moved across the whole
+  period, not a peak concurrent-exposure figure.
 
 ### Strategy research backlog — not active
 
