@@ -172,6 +172,63 @@ def test_run_upstox_backtest_never_selects_an_angel_sourced_contract(tmp_path) -
     assert result.trade_details[0].token == "NSE_FO|1|13-08-2026"
 
 
+def test_run_upstox_backtest_stop_risk_fraction_none_disables_the_stop(tmp_path) -> None:
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    underlying = _underlying_candles(4, start=start)
+    archive.save_upstox_candles(
+        [
+            UpstoxCandle(c.symbol, c.started_at, c.open, c.high, c.low, c.close)
+            for c in underlying
+        ],
+        token=NIFTY_UNDERLYING_KEY,
+        exchange="NSE_INDEX",
+        timeframe="FIVE_MINUTE",
+        collected_at=start,
+    )
+    archive.save_instruments(
+        [
+            Instrument(
+                "NIFTY13AUG2626600CE",
+                "NSE_FO|1|13-08-2026",
+                "NFO",
+                "NIFTY",
+                "CE",
+                75,
+                date(2026, 8, 13),
+                100,
+            )
+        ],
+        start,
+    )
+    # A deep dip (low=50) that would normally trigger the stop immediately.
+    archive.save_upstox_candles(
+        [UpstoxCandle("NIFTY13AUG2626600CE", start + timedelta(minutes=10), 100, 101, 50, 92)],
+        token="NSE_FO|1|13-08-2026",
+        exchange="NFO",
+        timeframe="FIVE_MINUTE",
+        collected_at=start + timedelta(minutes=10),
+    )
+    settings = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3")}
+    )
+    strategy = ScriptedStrategy({2: Signal(Direction.BULLISH, 0.6, 10.0, "test")})
+
+    from options_bot.backtest import BacktestParameters
+
+    result = run_upstox_backtest(
+        archive,
+        strategy=strategy,
+        settings=settings,
+        parameters=BacktestParameters(stop_risk_fraction=None),
+    )
+
+    trade = result.trade_details[0]
+    assert trade.exit_reason not in ("stop", "stop-gap")
+    assert trade.stop_price == 0.0
+
+
 def test_run_upstox_backtest_respects_parameter_filters(tmp_path) -> None:
     archive = MarketArchive(tmp_path / "market.sqlite3")
     archive.initialize()

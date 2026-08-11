@@ -306,6 +306,17 @@ plain-text export of the full report (overall stats, every breakdown
 bucket, variant comparison, highlights, and the small-sample caution) meant
 to be copy-pasted into a chat when asking what to tune.
 
+`BacktestParameters.stop_risk_fraction` accepts `None` to disable the
+price-based stop/target/trailing-stop exit entirely, so a trade only closes
+on a signal reversal, a max-hold cap, or the session force-exit time. This
+exists because the default fixed-rupee stop distance
+(`MAX_LOSS_PER_TRADE × stop_risk_fraction ÷ lot size`) can be only a few
+rupees of option premium — tight enough that ordinary intraday noise
+triggers it on nearly every trade, making win rate look far worse than the
+underlying signal quality actually is. `STRATEGY_VARIANTS` includes a
+`"No stop-loss cap"` entry so this is always visible in the deep-analysis
+variant comparison.
+
 ## Tests
 
 ```bash

@@ -92,7 +92,14 @@ class OptionBacktestTrade:
 
 @dataclass(frozen=True)
 class BacktestParameters:
-    """Explicit, offline-only strategy comparison parameters."""
+    """Explicit, offline-only strategy comparison parameters.
+
+    ``stop_risk_fraction=None`` removes the price-based stop/target/trailing
+    exit entirely, so a trade only closes on a signal reversal, a max-hold
+    cap, or the session's force-exit time -- useful for seeing a strategy's
+    un-stopped behaviour before deciding what stop distance actually fits
+    the instrument.
+    """
 
     name: str = "Baseline"
     bullish_rsi_min: float | None = None
@@ -101,7 +108,7 @@ class BacktestParameters:
     entry_start: time | None = None
     entry_end: time | None = None
     exclude_expiry_day: bool = False
-    stop_risk_fraction: float = 0.8
+    stop_risk_fraction: float | None = 0.8
     maximum_hold_minutes: int | None = None
     target_return: float | None = None
     trailing_stop: float | None = None
@@ -201,13 +208,14 @@ def run_momentum_backtest(
             buy_fill = round(float(entry[1]) * (1 + slippage), 2)
             units = int(contract[1])
             fees = 2 * settings.paper_fee_per_order if settings else 0.0
+            has_stop_cap = settings and variant.stop_risk_fraction is not None
             risk_budget = (
                 settings.max_loss_per_trade * variant.stop_risk_fraction
-                if settings
+                if has_stop_cap
                 else float("inf")
             )
-            stop_distance = (risk_budget - fees) / units if settings else float("inf")
-            stop = round(buy_fill - stop_distance, 2) if settings else 0.0
+            stop_distance = (risk_budget - fees) / units if has_stop_cap else float("inf")
+            stop = round(buy_fill - stop_distance, 2) if has_stop_cap else 0.0
             selected_exit = path[-1]
             exit_price = float(selected_exit[4])
             exit_reason = "max-hold" if timed_exit else (

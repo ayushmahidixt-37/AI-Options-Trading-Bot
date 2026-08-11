@@ -46,6 +46,7 @@ STRATEGY_VARIANTS = (
     BacktestParameters(name="30-minute hold", maximum_hold_minutes=30),
     BacktestParameters(name="20% target", target_return=0.2),
     BacktestParameters(name="10% trailing stop", trailing_stop=0.1),
+    BacktestParameters(name="No stop-loss cap", stop_risk_fraction=None),
 )
 
 

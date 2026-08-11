@@ -245,6 +245,21 @@ data-only: it must never place orders and is not a second trading broker.
   `format_analysis_summary()` in `upstox_analysis.py` does the rendering; it
   is a pure formatter over already-computed data, not a new analysis path.
   404s until a backtest has been run.
+- **New "No stop-loss cap" variant, and why it exists.** A real month-long
+  Upstox backtest (56 trades, July 2026) showed a 7.1% win rate with a
+  suspiciously uniform ~-300 average loss in almost every breakdown bucket —
+  the fingerprint of trades being mechanically stopped out by a fixed-rupee
+  stop distance (`MAX_LOSS_PER_TRADE × stop_risk_fraction ÷ lot size`, a few
+  rupees of option premium by default) rather than a genuine directional
+  read. `BacktestParameters.stop_risk_fraction` is now `float | None`;
+  setting it to `None` skips the price-based stop/target/trailing-stop
+  block entirely in both `backtest.py` and `upstox_backtest.py`, so a trade
+  only exits on a signal reversal, a max-hold cap, or the session's
+  force-exit time. `STRATEGY_VARIANTS` in `validation.py` includes this as
+  `"No stop-loss cap"` so it always appears in the deep-analysis variant
+  comparison and the "Copy analysis for Claude" export, for diagnosing
+  whether a strategy's real signal quality is being masked by an
+  over-tight stop before drawing conclusions from win rate alone.
 
 ### Strategy research backlog — not active
 
