@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
@@ -21,7 +21,12 @@ from .config import Settings
 from .health import healthcheck
 from .paper_monitor import PaperPositionMonitor
 from .risk import RiskRejected
-from .upstox_analysis import DeepAnalysisReport, generate_suggestions, run_deep_analysis
+from .upstox_analysis import (
+    DeepAnalysisReport,
+    format_analysis_summary,
+    generate_suggestions,
+    run_deep_analysis,
+)
 from .upstox_data import UpstoxClient, UpstoxDataError
 from .upstox_ingest import NIFTY_UNDERLYING_KEY, IngestionSummary, pull_range
 from .validation import ValidationReport, export_validation_csv, run_strategy_validation
@@ -465,6 +470,12 @@ def create_web_app(
         target = settings.data_dir / "exports" / "upstox-backtest-trades.csv"
         export_backtest_csv(latest_upstox_analysis.overall, target)
         return FileResponse(target, filename=target.name, media_type="text/csv")
+
+    @app.get("/upstox/analysis-summary.txt", response_class=PlainTextResponse)
+    def download_upstox_analysis_summary(_user: str = Depends(require_login)) -> PlainTextResponse:
+        if latest_upstox_analysis is None:
+            raise HTTPException(status_code=404, detail="Run an Upstox backtest first")
+        return PlainTextResponse(format_analysis_summary(latest_upstox_analysis))
 
     @app.post("/actions/readiness-review", response_class=HTMLResponse)
     def update_readiness_review(

@@ -301,6 +301,10 @@ per dimension, generated from any sample size (unlike Suggestions) and
 clearly labeled "Preliminary" whenever either side is below the same
 20-trade threshold Suggestions requires — so there's always visible
 feedback on what's going well or badly, not just once 20+ trades exist.
+The Highlights card also links to `GET /upstox/analysis-summary.txt`, a
+plain-text export of the full report (overall stats, every breakdown
+bucket, variant comparison, highlights, and the small-sample caution) meant
+to be copy-pasted into a chat when asking what to tune.
 
 ## Tests
 

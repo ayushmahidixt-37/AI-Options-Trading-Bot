@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from options_bot.backtest import BacktestResult
+from options_bot.backtest import BacktestResult, OptionBacktestTrade
 from options_bot.candles import Candle
 from options_bot.config import Settings
 from options_bot.domain import Instrument
@@ -11,8 +11,11 @@ from options_bot.market_archive import MarketArchive
 from options_bot.strategy import Direction, Signal
 from options_bot.upstox_analysis import (
     DeepAnalysisReport,
+    Highlight,
     TradeBreakdown,
+    VariantComparison,
     _highlight,
+    format_analysis_summary,
     generate_suggestions,
     run_deep_analysis,
 )
@@ -201,3 +204,67 @@ def test_run_deep_analysis_smoke_end_to_end(tmp_path) -> None:
     assert report.variants == ()
     # generate_suggestions must not crash on a tiny sample; it should just be quiet
     assert generate_suggestions(report) == ()
+
+
+def _trade(signal_at: datetime, net_pnl: float) -> OptionBacktestTrade:
+    return OptionBacktestTrade(
+        signal_at=signal_at,
+        direction="BULLISH",
+        token="NSE_FO|1|31-12-2026",
+        symbol="NIFTY CE",
+        entry_at=signal_at + timedelta(minutes=5),
+        entry_price=100.0,
+        stop_price=90.0,
+        exit_at=signal_at + timedelta(minutes=10),
+        exit_price=100.0 + net_pnl / 75,
+        exit_reason="force-exit",
+        units=75,
+        gross_pnl=net_pnl,
+        fees=0.0,
+        net_pnl=net_pnl,
+        raw_points=net_pnl / 75,
+    )
+
+
+def test_format_analysis_summary_includes_period_and_overall_stats() -> None:
+    trades = (
+        _trade(datetime(2026, 7, 1, 10, 0, tzinfo=IST), 100.0),
+        _trade(datetime(2026, 7, 3, 11, 0, tzinfo=IST), -50.0),
+    )
+    result = BacktestResult(
+        "PRELIMINARY", 2, 1, 1, 50.0, 0.5, 50.0, 40.0, 50.0, 2.0, "reason", trades
+    )
+    report = DeepAnalysisReport(
+        overall=result,
+        time_of_day=(_breakdown("Morning", 2, 0.5),),
+        day_of_week=(),
+        expiry_day=(),
+        volatility_regime=(),
+        variants=(VariantComparison("Baseline", result),),
+        highlights=(
+            Highlight("time of day", "By time of day: X best, Y worst.", "evidence text", True),
+        ),
+    )
+
+    summary = format_analysis_summary(report)
+
+    assert "2026-07-01 to 2026-07-03" in summary
+    assert "Status: PRELIMINARY" in summary
+    assert "Trades: 2" in summary
+    assert "Morning: 2 trades, 50.0% win rate" in summary
+    assert "Baseline: 2 trades, net P&L 50.00" in summary
+    assert "[PRELIMINARY]" in summary
+    assert "evidence text" in summary
+    assert "CAUTION" in summary
+    assert "Paste this into a chat with Claude" in summary
+
+
+def test_format_analysis_summary_handles_no_data_gracefully() -> None:
+    report = _report()
+
+    summary = format_analysis_summary(report)
+
+    assert "Trade period covered" not in summary  # no trades, so no period to report
+    assert "(no data)" in summary
+    assert "(not enough distinct groups with trades yet)" in summary
+    assert "Status: INSUFFICIENT DATA" in summary
