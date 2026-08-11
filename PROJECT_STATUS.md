@@ -4,10 +4,13 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-09
+**Last updated:** 2026-08-11
 **Current phase:** Forward paper evidence collection and validation review;
-Upstox historical-backtesting feature complete (Batch 3 of 3: dashboard tab
-plus validation-loop integration, tested locally, not yet pushed)
+Upstox historical-backtesting feature complete and merged to `main`. Real
+device (Termux) confirmed the dashboard tab works; a Cloudflare bot-block on
+the Upstox client (HTTP 403 error 1010, caused by a missing User-Agent
+header) was found and fixed. A real multi-month data pull is still pending
+the user's own Upstox Plus subscription/access token.
 **Production status:** Not approved for live trading
 
 ## Objective
@@ -182,15 +185,23 @@ data-only: it must never place orders and is not a second trading broker.
   unchanged), so Upstox-sourced strategy variants can go through the
   identical development/validation/untouched-test selection discipline
   instead of a shortcut.
-- Manually verified end-to-end on this machine: booted the dashboard with
+- Manually verified end-to-end in development: booted the dashboard with
   `UPSTOX_BACKTEST_ENABLED=true` and a placeholder token, confirmed the new
   tab renders, confirmed the disabled/missing-credential/network-failure
   paths all show friendly messages instead of crashing (a real bug — an
   unhandled network exception causing a 500 — was found and fixed this way,
   with a regression test added), and confirmed the backtest action correctly
-  reports `INSUFFICIENT DATA` against an empty archive. A real multi-month
-  pull against live Upstox data has not been run — that requires the user's
-  own Upstox Plus subscription and access token.
+  reports `INSUFFICIENT DATA` against an empty archive.
+- **Confirmed on a real Termux device**: the "Historical backtest" tab
+  renders and the ingest form submits correctly. That run surfaced a real
+  production issue not reachable from development testing: Upstox's API
+  sits behind Cloudflare, which returned `HTTP 403` (Cloudflare error 1010,
+  "blocked access based on your browser's signature") because the client
+  sent no `User-Agent` header, so Python's default (`Python-urllib/...`)
+  was flagged as a bot. Fixed by sending a standard browser-style
+  `User-Agent`/`Accept-Language`, covered by a regression test. A real
+  multi-month pull against live Upstox data has still not been run — that
+  requires the user's own Upstox Plus subscription and access token.
 
 ### Strategy research backlog — not active
 
@@ -347,16 +358,15 @@ At the end of every development session, update this file when applicable:
 - The most valuable next activity is collecting complete forward paper sessions,
   preserving the SQLite archive, and reviewing Phase B only when every split has
   adequate low-gap option history.
-- Upstox historical-backtesting Batch 1 (credentials/settings/client plus
-  storage/ingestion) shipped and was pulled to the user's own device for a
-  boot-only smoke test (no dashboard changes to see yet).
-- Upstox historical-backtesting Batch 2 (backtest-from-raw-candles engine
-  plus deep analysis/suggestions) shipped.
-- Upstox historical-backtesting Batch 3 (dashboard tab plus validation-loop
-  integration) is implemented and locally verified — `pytest`, `ruff`,
-  `compileall`, and a real boot-and-click-through of the running dashboard —
-  but not yet pushed, pending explicit confirmation. `UPSTOX_BACKTEST_ENABLED`
-  still defaults to `false`, so this batch changes no runtime behavior for
-  existing forward-paper operation unless explicitly turned on. The Upstox
-  historical-backtesting feature is now feature-complete end-to-end, pending
-  the user's own Upstox Plus subscription/access token for a real data pull.
+- All three Upstox historical-backtesting batches (credentials/settings/
+  client; storage/ingestion; backtest engine and deep analysis/suggestions;
+  dashboard tab and validation-loop integration) are merged to `main`.
+  `UPSTOX_BACKTEST_ENABLED` still defaults to `false`, so none of this
+  changes runtime behavior for existing forward-paper operation unless
+  explicitly turned on.
+- Confirmed working on a real Termux device: the dashboard tab renders and
+  the ingest action reaches Upstox. A Cloudflare bot-block (HTTP 403, error
+  1010) caused by a missing `User-Agent` header was found this way and
+  fixed, merged separately. The Upstox historical-backtesting feature is now
+  feature-complete end-to-end, pending the user's own Upstox Plus
+  subscription/access token for a real multi-month data pull.

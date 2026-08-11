@@ -14,6 +14,7 @@ def _transport(status: int, body: dict[str, object] | str):
         assert headers["Authorization"] == "Bearer test-token"
         assert timeout_seconds == 10
         fake.last_url = url
+        fake.last_headers = headers
         return status, text
 
     return fake
@@ -22,6 +23,14 @@ def _transport(status: int, body: dict[str, object] | str):
 def test_requires_access_token() -> None:
     with pytest.raises(UpstoxDataError):
         UpstoxClient("")
+
+
+def test_sends_a_browser_style_user_agent_to_avoid_cloudflare_bot_blocks() -> None:
+    transport = _transport(200, {"status": "success", "data": []})
+    client = UpstoxClient("test-token", transport=transport)
+    client.search_instruments("NIFTY")
+    assert "python" not in transport.last_headers["User-Agent"].lower()
+    assert "Mozilla" in transport.last_headers["User-Agent"]
 
 
 def test_search_instruments_returns_data() -> None:
