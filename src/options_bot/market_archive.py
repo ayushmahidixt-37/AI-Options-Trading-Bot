@@ -12,6 +12,7 @@ from typing import Iterator
 
 from .candles import Candle
 from .domain import Instrument
+from .upstox_data import UpstoxCandle
 
 
 @dataclass(frozen=True)
@@ -117,6 +118,14 @@ class MarketArchive:
                     ON instruments(underlying, expiry, strike);
                 """
             )
+            self._ensure_column(con, "market_candles", "open_interest", "REAL")
+
+    @staticmethod
+    def _ensure_column(con: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
+        """Add a nullable column if missing (SQLite has no ADD COLUMN IF NOT EXISTS)."""
+        existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
 
     def set_operational_state(
         self, key: str, value: object, observed_at: datetime
@@ -172,6 +181,49 @@ class MarketArchive:
                        instrument_token, symbol, exchange_name, timeframe, started_at,
                        open, high, low, close, source, collected_at
                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+            return con.total_changes - before
+
+    def save_upstox_candles(
+        self,
+        candles: list[UpstoxCandle],
+        *,
+        token: str,
+        exchange: str,
+        timeframe: str,
+        collected_at: datetime,
+    ) -> int:
+        """Store Upstox-sourced candles under ``source='upstox'``.
+
+        Kept separate from ``save_candles`` (the always-running Angel path)
+        so this read-only backtesting feature can never change Angel
+        ingestion behavior.
+        """
+        rows = [
+            (
+                token,
+                candle.symbol,
+                exchange,
+                timeframe,
+                candle.started_at.isoformat(),
+                candle.open,
+                candle.high,
+                candle.low,
+                candle.close,
+                "upstox",
+                collected_at.isoformat(),
+                candle.open_interest,
+            )
+            for candle in candles
+        ]
+        with self.connect() as con:
+            before = con.total_changes
+            con.executemany(
+                """INSERT OR IGNORE INTO market_candles(
+                       instrument_token, symbol, exchange_name, timeframe, started_at,
+                       open, high, low, close, source, collected_at, open_interest
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 rows,
             )
             return con.total_changes - before

@@ -340,3 +340,111 @@ def test_web_requires_separate_confirmation_for_paper_proposal(tmp_path: Path) -
     )
     assert "Opened paper position" in confirmed.text
     assert "NIFTY_TEST_CE" in confirmed.text
+
+
+def test_upstox_tab_is_disabled_by_default(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+
+    ingest = client.post(
+        "/actions/upstox-ingest",
+        data={"start_date": "2026-08-01", "end_date": "2026-08-07"},
+        auth=auth(),
+    )
+    backtest = client.post("/actions/upstox-backtest", auth=auth())
+
+    assert "UPSTOX_BACKTEST_ENABLED=true" in ingest.text
+    assert "UPSTOX_BACKTEST_ENABLED=true" in backtest.text
+    assert client.get("/upstox/trades.csv", auth=auth()).status_code == 404
+
+
+def test_upstox_ingest_requires_credentials_when_enabled(tmp_path: Path) -> None:
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    ingest = client.post(
+        "/actions/upstox-ingest",
+        data={"start_date": "2026-08-01", "end_date": "2026-08-07"},
+        auth=auth(),
+    )
+
+    assert "Upstox credentials are incomplete" in ingest.text or "Credential file not found" in ingest.text
+
+
+def test_upstox_ingest_rejects_backwards_date_range_when_enabled(tmp_path: Path) -> None:
+    credentials = tmp_path / "credentials.env"
+    credentials.write_text("UPSTOX_ACCESS_TOKEN=test-token\n", encoding="utf-8")
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "CREDENTIALS_PATH": str(credentials),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    ingest = client.post(
+        "/actions/upstox-ingest",
+        data={"start_date": "2026-08-10", "end_date": "2026-08-01"},
+        auth=auth(),
+    )
+
+    assert "Start date must not be after end date" in ingest.text
+
+
+def test_upstox_ingest_happy_path_uses_pull_range(tmp_path: Path, monkeypatch) -> None:
+    import options_bot.web as web_module
+    from options_bot.upstox_ingest import IngestionSummary
+
+    credentials = tmp_path / "credentials.env"
+    credentials.write_text("UPSTOX_ACCESS_TOKEN=test-token\n", encoding="utf-8")
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "CREDENTIALS_PATH": str(credentials),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    fake_summary = IngestionSummary(
+        contracts_planned=2, contracts_pulled=2, candles_saved=10, instruments_saved=2, warnings=()
+    )
+    monkeypatch.setattr(
+        web_module,
+        "pull_range",
+        lambda client, archive, start, end, **kwargs: fake_summary,
+    )
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    ingest = client.post(
+        "/actions/upstox-ingest",
+        data={"start_date": "2026-08-01", "end_date": "2026-08-07"},
+        auth=auth(),
+    )
+
+    assert "Upstox ingestion complete: 10 candles, 2 contracts" in ingest.text
+
+
+def test_upstox_backtest_reports_insufficient_data_and_csv_is_404_until_run(tmp_path: Path) -> None:
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    assert client.get("/upstox/trades.csv", auth=auth()).status_code == 404
+
+    backtest = client.post("/actions/upstox-backtest", auth=auth())
+
+    assert "Historical backtest (Upstox)" in backtest.text
+    assert "INSUFFICIENT DATA" in backtest.text
+    assert client.get("/upstox/trades.csv", auth=auth()).status_code == 404

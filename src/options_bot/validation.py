@@ -6,10 +6,13 @@ import csv
 from dataclasses import dataclass
 from datetime import date, time
 from pathlib import Path
+from typing import Callable
 
 from .backtest import BacktestParameters, BacktestResult, run_momentum_backtest
 from .config import Settings
 from .market_archive import MarketArchive
+
+BacktestRunner = Callable[..., BacktestResult]
 
 
 @dataclass(frozen=True)
@@ -56,7 +59,16 @@ def run_strategy_validation(
     validation_end: date,
     test_start: date,
     test_end: date,
+    runner: BacktestRunner = run_momentum_backtest,
 ) -> ValidationReport:
+    """Run the dev/validation/untouched-test split against any compatible backtest runner.
+
+    ``runner`` defaults to the in-production Angel-observation-based
+    ``run_momentum_backtest``, but any callable accepting the same
+    ``archive``/``start``/``end``/``settings``/``parameters`` keywords works
+    — for example ``run_upstox_backtest`` — so Upstox-sourced variants go
+    through the identical selection discipline instead of a shortcut.
+    """
     if not (
         development_start <= development_end < validation_start
         <= validation_end < test_start <= test_end
@@ -66,19 +78,19 @@ def run_strategy_validation(
         )
     rows: list[ValidationRow] = []
     for variant in STRATEGY_VARIANTS:
-        development = run_momentum_backtest(
+        development = runner(
             archive,
-            development_start,
-            development_end,
-            settings,
-            variant,
+            start=development_start,
+            end=development_end,
+            settings=settings,
+            parameters=variant,
         )
-        validation = run_momentum_backtest(
+        validation = runner(
             archive,
-            validation_start,
-            validation_end,
-            settings,
-            variant,
+            start=validation_start,
+            end=validation_end,
+            settings=settings,
+            parameters=variant,
         )
         rows.append(ValidationRow(variant.name, variant, development, validation))
     eligible = [row for row in rows if row.validation.trades > 0]
@@ -89,12 +101,12 @@ def run_strategy_validation(
             row.validation.trades,
         ),
     )
-    test_result = run_momentum_backtest(
+    test_result = runner(
         archive,
-        test_start,
-        test_end,
-        settings,
-        selected.parameters,
+        start=test_start,
+        end=test_end,
+        settings=settings,
+        parameters=selected.parameters,
     )
     rows = [
         ValidationRow(

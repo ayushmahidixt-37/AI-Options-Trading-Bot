@@ -15,6 +15,19 @@ def test_loads_expected_names(tmp_path: Path) -> None:
     }
 
 
+def test_loads_upstox_credential_names(tmp_path: Path) -> None:
+    path = tmp_path / "secrets"
+    path.write_text(
+        "UPSTOX_API_KEY=key\nUPSTOX_API_SECRET=secret\nUPSTOX_ACCESS_TOKEN=token\n"
+    )
+
+    assert load_credentials(path) == {
+        "UPSTOX_API_KEY": "key",
+        "UPSTOX_API_SECRET": "secret",
+        "UPSTOX_ACCESS_TOKEN": "token",
+    }
+
+
 @pytest.mark.parametrize("content", ["NOT_A_LINE", "UNEXPECTED_NAME=value", "=value"])
 def test_rejects_malformed_or_unknown_lines(tmp_path: Path, content: str) -> None:
     path = tmp_path / "secrets"

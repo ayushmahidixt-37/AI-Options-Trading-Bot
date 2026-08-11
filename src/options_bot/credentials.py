@@ -15,6 +15,9 @@ EXPECTED_CREDENTIAL_NAMES = frozenset(
         "TELEGRAM_BOT_TOKEN",
         "TELEGRAM_CHAT_ID",
         "OPENAI_API_KEY",
+        "UPSTOX_API_KEY",
+        "UPSTOX_API_SECRET",
+        "UPSTOX_ACCESS_TOKEN",
     }
 )
 

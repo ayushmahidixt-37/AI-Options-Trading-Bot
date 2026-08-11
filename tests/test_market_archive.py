@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from options_bot.candles import Candle
 from options_bot.domain import Instrument
 from options_bot.market_archive import MarketArchive
+from options_bot.upstox_data import UpstoxCandle
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -116,6 +117,71 @@ def test_integrity_latest_candle_and_gap_summary(tmp_path: Path) -> None:
             "last_missing": (started + timedelta(minutes=5)).isoformat(),
         }
     ]
+
+
+def test_initialize_is_idempotent_and_adds_open_interest_column(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    store.initialize()  # run twice: migration must not fail on an existing column
+
+    with sqlite3.connect(store.path) as con:
+        columns = {row[1] for row in con.execute("PRAGMA table_info(market_candles)")}
+    assert "open_interest" in columns
+
+
+def test_upstox_candles_are_duplicate_safe_and_carry_open_interest(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    started = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    candles = [UpstoxCandle("NIFTY24APR25000CE", started, 100, 103, 99, 102, open_interest=5000)]
+
+    assert store.save_upstox_candles(
+        candles,
+        token="NSE_FO|53806|24-04-2025",
+        exchange="NFO",
+        timeframe="FIVE_MINUTE",
+        collected_at=started,
+    ) == 1
+    assert store.save_upstox_candles(
+        candles,
+        token="NSE_FO|53806|24-04-2025",
+        exchange="NFO",
+        timeframe="FIVE_MINUTE",
+        collected_at=started,
+    ) == 0
+
+    with sqlite3.connect(store.path) as con:
+        row = con.execute(
+            "SELECT source, open_interest FROM market_candles WHERE instrument_token=?",
+            ("NSE_FO|53806|24-04-2025",),
+        ).fetchone()
+    assert row == ("upstox", 5000.0)
+
+
+def test_upstox_and_angel_candles_coexist_without_collision(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    started = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    store.save_candles(
+        [Candle("Nifty 50", started, 100, 103, 99, 102)],
+        token="99926000",
+        exchange="NSE",
+        timeframe="FIVE_MINUTE",
+        collected_at=started,
+    )
+    store.save_upstox_candles(
+        [UpstoxCandle("Nifty 50", started, 100, 103, 99, 102)],
+        token="NSE_INDEX|Nifty 50",
+        exchange="NSE_INDEX",
+        timeframe="FIVE_MINUTE",
+        collected_at=started,
+    )
+
+    stats = store.stats()
+    assert stats.candle_count == 2
+    with sqlite3.connect(store.path) as con:
+        sources = {
+            row[0]
+            for row in con.execute("SELECT source FROM market_candles ORDER BY source")
+        }
+    assert sources == {"angel-one", "upstox"}
 
 
 def test_operational_state_and_backup_rotation_are_durable(tmp_path: Path) -> None:

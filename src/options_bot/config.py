@@ -104,6 +104,9 @@ class Settings:
     monitor_failure_alert_threshold: int
     minimum_free_storage_mb: int
     backup_retention_count: int
+    upstox_enabled: bool
+    upstox_request_timeout_seconds: int
+    upstox_max_lookback_days: int
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -143,6 +146,13 @@ class Settings:
             ),
             backup_retention_count=_integer(
                 values, "BACKUP_RETENTION_COUNT", 14, 1
+            ),
+            upstox_enabled=_boolean(values, "UPSTOX_BACKTEST_ENABLED", False),
+            upstox_request_timeout_seconds=_integer(
+                values, "UPSTOX_TIMEOUT_SECONDS", 10, 1
+            ),
+            upstox_max_lookback_days=_integer(
+                values, "UPSTOX_MAX_LOOKBACK_DAYS", 180, 1
             ),
         )
         settings.validate()
