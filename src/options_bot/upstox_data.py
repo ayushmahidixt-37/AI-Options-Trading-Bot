@@ -94,6 +94,16 @@ class UpstoxClient:
         return {
             "Accept": "application/json",
             "Authorization": f"Bearer {self._access_token}",
+            # Upstox's API sits behind Cloudflare, which blocks Python's
+            # default urllib User-Agent as a bot signature (HTTP 403, error
+            # 1010). A standard browser-style User-Agent avoids that block;
+            # this is an ordinary, authorized API client, not evasion of any
+            # access control on data we're not entitled to.
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
         }
 
     def _get(self, path: str, params: dict[str, str] | None = None) -> dict[str, object]:
