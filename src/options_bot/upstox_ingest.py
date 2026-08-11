@@ -86,6 +86,21 @@ class RateLimiter:
         self._last_call = self._clock()
 
 
+def _contract_field(item: dict[str, object], *names: str) -> object:
+    """Read the first present field name, tolerating Upstox's inconsistent docs.
+
+    Raises a clear, diagnosable error (the actual keys present) instead of a
+    raw KeyError if none of the candidate names match a real response.
+    """
+    for name in names:
+        if name in item:
+            return item[name]
+    raise UpstoxDataError(
+        f"Upstox expired option contract response is missing all of {names}; "
+        f"got fields {sorted(item.keys())}"
+    )
+
+
 def _reference_spot(strikes: list[float]) -> float:
     """Approximate ATM using the median strike when no live spot price is known."""
     if not strikes:
@@ -130,7 +145,7 @@ def plan_ingestion(
         contracts = client.get_expired_option_contracts(underlying_key, expiry)
         if not contracts:
             continue
-        strikes = sorted({float(item["strike_price"]) for item in contracts})
+        strikes = sorted({float(_contract_field(item, "strike_price", "strike")) for item in contracts})
         reference_spot = _reference_spot(strikes)
         atm_index = min(
             range(len(strikes)), key=lambda index: abs(strikes[index] - reference_spot)
@@ -143,16 +158,22 @@ def plan_ingestion(
         if contract_start > contract_end:
             continue
         for item in contracts:
-            strike = float(item["strike_price"])
+            strike = float(_contract_field(item, "strike_price", "strike"))
             if strike not in selected_strikes:
                 continue
-            token = str(item["expired_instrument_key"])
+            # Upstox's own docs are inconsistent here: the "Backtesting" guide
+            # calls this field expired_instrument_key, but the confirmed
+            # Expired Future Contracts response names it instrument_key.
+            # Real Get Expired Option Contracts responses have used
+            # instrument_key — accept either, in that order.
+            token = str(_contract_field(item, "instrument_key", "expired_instrument_key"))
+            option_type = str(_contract_field(item, "instrument_type", "option_type"))
             instrument = Instrument(
                 symbol=str(item.get("trading_symbol", token)),
                 token=token,
                 exchange="NFO",
                 underlying="NIFTY",
-                option_type=str(item["instrument_type"]),
+                option_type=option_type,
                 lot_size=int(item.get("lot_size", 1)),
                 expiry=expiry,
                 strike=strike,

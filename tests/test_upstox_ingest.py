@@ -31,16 +31,19 @@ class FakeClient:
         return self.expiries
 
     def get_expired_option_contracts(self, instrument_key: str, expiry: date) -> list[dict]:
+        # Real Upstox responses use "instrument_key" here, not the
+        # "expired_instrument_key" name their own docs inconsistently use
+        # elsewhere — this fixture matches the confirmed real shape.
         return [
             {
-                "expired_instrument_key": f"NSE_FO|1|{expiry.isoformat()}",
+                "instrument_key": f"NSE_FO|1|{expiry.isoformat()}",
                 "strike_price": 24500,
                 "instrument_type": "CE",
                 "trading_symbol": "NIFTY CE 24500",
                 "lot_size": 75,
             },
             {
-                "expired_instrument_key": f"NSE_FO|2|{expiry.isoformat()}",
+                "instrument_key": f"NSE_FO|2|{expiry.isoformat()}",
                 "strike_price": 24600,
                 "instrument_type": "PE",
                 "trading_symbol": "NIFTY PE 24600",
@@ -107,6 +110,46 @@ def test_plan_ingestion_selects_near_atm_strikes_within_range() -> None:
     assert all(isinstance(plan, ContractPlan) for plan in plans)
     assert {plan.instrument.strike for plan in plans} == {24500.0, 24600.0}
     assert {plan.expiry for plan in plans} == {date(2025, 4, 24), date(2025, 5, 1)}
+
+
+def test_plan_ingestion_accepts_the_expired_instrument_key_field_name_too() -> None:
+    """Upstox's own docs use this name in prose even though real responses don't."""
+
+    class LegacyFieldNameClient(FakeClient):
+        def get_expired_option_contracts(self, instrument_key: str, expiry: date) -> list[dict]:
+            return [
+                {
+                    "expired_instrument_key": f"NSE_FO|1|{expiry.isoformat()}",
+                    "strike_price": 24500,
+                    "instrument_type": "CE",
+                    "trading_symbol": "NIFTY CE 24500",
+                    "lot_size": 75,
+                },
+            ]
+
+    plans, _ = plan_ingestion(
+        LegacyFieldNameClient(),
+        date(2025, 4, 1),
+        date(2025, 4, 30),
+        max_lookback_days=180,
+        observed_today=date(2025, 4, 30),
+    )
+    assert plans[0].instrument.token == "NSE_FO|1|2025-04-24"
+
+
+def test_plan_ingestion_raises_a_clear_error_when_contract_fields_are_unrecognized() -> None:
+    class UnrecognizedFieldClient(FakeClient):
+        def get_expired_option_contracts(self, instrument_key: str, expiry: date) -> list[dict]:
+            return [{"some_other_key": "value"}]
+
+    with pytest.raises(UpstoxDataError, match="missing all of"):
+        plan_ingestion(
+            UnrecognizedFieldClient(),
+            date(2025, 4, 1),
+            date(2025, 4, 30),
+            max_lookback_days=180,
+            observed_today=date(2025, 4, 30),
+        )
 
 
 def test_plan_ingestion_warns_and_trims_when_start_exceeds_lookback_ceiling() -> None:
