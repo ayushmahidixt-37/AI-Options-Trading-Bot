@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from options_bot.backtest import export_backtest_csv, run_momentum_backtest
+from options_bot.backtest import BacktestParameters, export_backtest_csv, run_momentum_backtest
 from options_bot.candles import Candle
 from options_bot.config import Settings
 from options_bot.domain import Instrument
@@ -130,3 +130,46 @@ def test_backtest_uses_conservative_stop_fill(tmp_path) -> None:
 
     assert result.trade_details[0].exit_reason == "stop"
     assert result.trade_details[0].exit_price < result.trade_details[0].entry_price
+
+
+def test_stop_risk_fraction_none_disables_the_price_based_stop(tmp_path) -> None:
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+    archive.save_instruments(
+        [
+            Instrument(
+                "NIFTY13AUG2624600CE",
+                "CE1",
+                "NFO",
+                "NIFTY",
+                "CE",
+                75,
+                date(2026, 8, 13),
+                24600,
+            )
+        ],
+        start,
+    )
+    archive.save_observation(start, observation("BULLISH"))
+    # Same candle as test_backtest_uses_conservative_stop_fill: low=90 would
+    # normally trigger the stop well before the session ends.
+    archive.save_candles(
+        [Candle("NIFTY13AUG2624600CE", start + timedelta(minutes=5), 100, 101, 90, 92)],
+        token="CE1",
+        exchange="NFO",
+        timeframe="FIVE_MINUTE",
+        collected_at=start + timedelta(minutes=10),
+    )
+    settings = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3")}
+    )
+
+    result = run_momentum_backtest(
+        archive, settings=settings, parameters=BacktestParameters(stop_risk_fraction=None)
+    )
+
+    trade = result.trade_details[0]
+    assert trade.exit_reason != "stop"
+    assert trade.exit_reason != "stop-gap"
+    assert trade.stop_price == 0.0

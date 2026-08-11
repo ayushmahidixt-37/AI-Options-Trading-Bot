@@ -191,13 +191,14 @@ def run_upstox_backtest(
             buy_fill = round(float(entry[1]) * (1 + slippage), 2)
             units = int(contract[1])
             fees = 2 * settings.paper_fee_per_order if settings else 0.0
+            has_stop_cap = settings and variant.stop_risk_fraction is not None
             risk_budget = (
                 settings.max_loss_per_trade * variant.stop_risk_fraction
-                if settings
+                if has_stop_cap
                 else float("inf")
             )
-            stop_distance = (risk_budget - fees) / units if settings else float("inf")
-            stop = round(buy_fill - stop_distance, 2) if settings else 0.0
+            stop_distance = (risk_budget - fees) / units if has_stop_cap else float("inf")
+            stop = round(buy_fill - stop_distance, 2) if has_stop_cap else 0.0
             selected_exit = path[-1]
             exit_price = float(selected_exit[4])
             exit_reason = "max-hold" if timed_exit else (
