@@ -253,4 +253,4 @@ def run_upstox_backtest(
                     raw_points=round(exit_price - float(entry[1]), 2),
                 )
             )
-    return build_backtest_result(trades, archive, settings, trading_days)
+    return build_backtest_result(trades, archive, settings, trading_days, source="upstox")

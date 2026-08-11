@@ -132,6 +132,33 @@ def test_run_upstox_backtest_replays_a_signal_without_strategy_observations(tmp_
         assert con.execute("SELECT COUNT(*) FROM strategy_observations").fetchone()[0] == 0
 
 
+def test_run_upstox_backtest_status_ignores_angel_sourced_gaps(tmp_path) -> None:
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    _seed_upstox_backtest_archive(archive, start)
+    # A real gap, but in Angel-sourced data -- must never affect Upstox status.
+    archive.save_candles(
+        [
+            Candle("NIFTY", start, 100, 103, 99, 102),
+            Candle("NIFTY", start + timedelta(minutes=20), 102, 104, 101, 103),
+        ],
+        token="99926000",
+        exchange="NSE",
+        timeframe="FIVE_MINUTE",
+        collected_at=start + timedelta(minutes=20),
+    )
+    settings = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3")}
+    )
+    strategy = ScriptedStrategy({2: Signal(Direction.BULLISH, 0.6, 10.0, "test")})
+
+    result = run_upstox_backtest(archive, strategy=strategy, settings=settings)
+
+    assert result.data_gaps == 0
+    assert result.status != "DATA QUALITY WARNING"
+
+
 def test_run_upstox_backtest_never_selects_an_angel_sourced_contract(tmp_path) -> None:
     archive = MarketArchive(tmp_path / "market.sqlite3")
     archive.initialize()

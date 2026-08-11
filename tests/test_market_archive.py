@@ -119,6 +119,37 @@ def test_integrity_latest_candle_and_gap_summary(tmp_path: Path) -> None:
     ]
 
 
+def test_gap_summary_never_mixes_angel_and_upstox_sources(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    started = datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+    # A real gap in the Angel-sourced candles only.
+    store.save_candles(
+        [
+            Candle("Nifty 50", started, 100, 103, 99, 102),
+            Candle("Nifty 50", started + timedelta(minutes=10), 102, 104, 101, 103),
+        ],
+        token="99926000",
+        exchange="NSE",
+        timeframe="FIVE_MINUTE",
+        collected_at=started + timedelta(minutes=10),
+    )
+    # A continuous, gap-free run of Upstox-sourced candles for a different token.
+    store.save_upstox_candles(
+        [
+            UpstoxCandle("NIFTY", started, 100, 103, 99, 102),
+            UpstoxCandle("NIFTY", started + timedelta(minutes=5), 102, 104, 101, 103),
+        ],
+        token="NSE_INDEX|Nifty 50",
+        exchange="NSE_INDEX",
+        timeframe="FIVE_MINUTE",
+        collected_at=started + timedelta(minutes=5),
+    )
+
+    assert len(store.gap_summary("angel-one")) == 1
+    assert store.gap_summary("upstox") == []
+    assert store.gap_summary() == store.gap_summary("angel-one")
+
+
 def test_initialize_is_idempotent_and_adds_open_interest_column(tmp_path: Path) -> None:
     store = archive(tmp_path)
     store.initialize()  # run twice: migration must not fail on an existing column

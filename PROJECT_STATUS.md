@@ -274,6 +274,45 @@ data-only: it must never place orders and is not a second trading broker.
   capital, not simultaneous margin — positions are opened one at a time,
   never overlapping, so this is the sum of money moved across the whole
   period, not a peak concurrent-exposure figure.
+- **Fixed a real cross-source data-quality bug found while building the
+  validation wiring below.** `MarketArchive.gap_summary()` queried
+  `market_candles` across *all* sources at once, so a genuine gap in
+  Angel's own archive could mark every Upstox backtest as
+  `DATA QUALITY WARNING` (and vice versa) even when the source actually
+  being backtested had zero gaps. `gap_summary()` now takes a `source`
+  parameter (default `"angel-one"`); `build_backtest_result()` threads the
+  correct source through from both `run_momentum_backtest` (`"angel-one"`)
+  and `run_upstox_backtest` (`"upstox"`), so each engine's status only ever
+  reflects its own data's quality.
+- **"Custom parameters" card — build/test a strategy variant from the UI,
+  no code change per attempt.** A new form on the Historical Backtest
+  (Upstox) tab exposes every tunable `BacktestParameters` field (stop-loss
+  width or no-cap, max hold minutes, profit target %, trailing stop %,
+  RSI thresholds, minimum ATR, entry window, expiry-day exclusion, allowed
+  weekdays) and runs `/actions/upstox-custom-backtest` immediately over the
+  chosen range via `run_deep_analysis(..., variants=(custom,))`, showing
+  the same stats/highlights as the main backtest card plus its own CSV and
+  "Copy analysis for Claude" export. The form re-populates with the last
+  submitted values so iterating (change one field, rerun) doesn't require
+  retyping everything. This is deliberately a fast, ungated exploration
+  loop — a promising custom combination graduates to real trust only by
+  being hardcoded as a new named entry in `STRATEGY_VARIANTS` and then
+  run through the stricter validation split below.
+- **Strategy validation now works against Upstox data too.**
+  `run_strategy_validation()` already accepted an injectable `runner`
+  (added in an earlier phase) but no dashboard route ever passed
+  `run_upstox_backtest` through it — the development/validation/untouched-
+  test split was Angel-only in practice. A new
+  `/actions/upstox-validation` route (mirroring the existing Angel
+  `/actions/strategy-validation` route and UI exactly) now runs the same
+  `STRATEGY_VARIANTS` list against Upstox data with
+  `runner=run_upstox_backtest`, so a variant that looks good in the quick
+  "Custom parameters" exploration can be confirmed the rigorous way —
+  selected on a validation range it wasn't picked from, then checked once
+  on an untouched test range — before it's trusted, exactly as the
+  project's existing anti-overfitting discipline requires for Angel-sourced
+  variants. Still 100% read-only historical replay; never touches
+  live/forward-paper trading.
 
 ### Strategy research backlog — not active
 
