@@ -431,6 +431,74 @@ def test_upstox_ingest_happy_path_uses_pull_range(tmp_path: Path, monkeypatch) -
     assert "Upstox ingestion complete: 10 candles, 2 contracts" in ingest.text
 
 
+def test_upstox_ingest_message_reports_skipped_cached_chunks(tmp_path: Path, monkeypatch) -> None:
+    import options_bot.web as web_module
+    from options_bot.upstox_ingest import IngestionSummary
+
+    credentials = tmp_path / "credentials.env"
+    credentials.write_text("UPSTOX_ACCESS_TOKEN=test-token\n", encoding="utf-8")
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "CREDENTIALS_PATH": str(credentials),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    fake_summary = IngestionSummary(
+        contracts_planned=2,
+        contracts_pulled=2,
+        candles_saved=0,
+        instruments_saved=2,
+        warnings=(),
+        chunks_skipped_cached=3,
+    )
+    monkeypatch.setattr(
+        web_module, "pull_range", lambda client, archive, start, end, **kwargs: fake_summary
+    )
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    ingest = client.post(
+        "/actions/upstox-ingest",
+        data={"start_date": "2026-08-01", "end_date": "2026-08-07"},
+        auth=auth(),
+    )
+
+    assert "3 chunk(s) already cached, skipped" in ingest.text
+
+
+def test_upstox_ingest_passes_force_refetch_through_to_pull_range(tmp_path: Path, monkeypatch) -> None:
+    import options_bot.web as web_module
+    from options_bot.upstox_ingest import IngestionSummary
+
+    credentials = tmp_path / "credentials.env"
+    credentials.write_text("UPSTOX_ACCESS_TOKEN=test-token\n", encoding="utf-8")
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "CREDENTIALS_PATH": str(credentials),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    captured: dict[str, object] = {}
+
+    def fake_pull_range(client, archive, start, end, **kwargs):
+        captured.update(kwargs)
+        return IngestionSummary(0, 0, 0, 0, ())
+
+    monkeypatch.setattr(web_module, "pull_range", fake_pull_range)
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    client.post(
+        "/actions/upstox-ingest",
+        data={"start_date": "2026-08-01", "end_date": "2026-08-07", "force_refetch": "true"},
+        auth=auth(),
+    )
+
+    assert captured["force_refetch"] is True
+
+
 def test_upstox_backtest_reports_insufficient_data_and_csv_is_404_until_run(tmp_path: Path) -> None:
     cfg = Settings.from_env(
         {

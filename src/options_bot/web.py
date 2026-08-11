@@ -23,7 +23,7 @@ from .paper_monitor import PaperPositionMonitor
 from .risk import RiskRejected
 from .upstox_analysis import DeepAnalysisReport, generate_suggestions, run_deep_analysis
 from .upstox_data import UpstoxClient, UpstoxDataError
-from .upstox_ingest import IngestionSummary, pull_range
+from .upstox_ingest import NIFTY_UNDERLYING_KEY, IngestionSummary, pull_range
 from .validation import ValidationReport, export_validation_csv, run_strategy_validation
 from .readiness import (
     build_readiness_report,
@@ -158,6 +158,7 @@ def create_web_app(
             "validation": latest_validation,
             "readiness": readiness,
             "upstox_ingestion": latest_upstox_ingestion,
+            "upstox_coverage": connections.archive.upstox_coverage_ranges(NIFTY_UNDERLYING_KEY),
             "upstox_analysis": latest_upstox_analysis,
             "upstox_suggestions": (
                 generate_suggestions(latest_upstox_analysis) if latest_upstox_analysis else ()
@@ -382,6 +383,7 @@ def create_web_app(
         request: Request,
         start_date: str = Form(""),
         end_date: str = Form(""),
+        force_refetch: bool = Form(False),
         _user: str = Depends(require_login),
     ) -> HTMLResponse:
         nonlocal latest_upstox_ingestion
@@ -399,15 +401,21 @@ def create_web_app(
                 start,
                 end,
                 max_lookback_days=settings.upstox_max_lookback_days,
+                force_refetch=force_refetch,
             )
             warning_note = (
                 f"; {len(latest_upstox_ingestion.warnings)} warning(s)"
                 if latest_upstox_ingestion.warnings
                 else ""
             )
+            skipped_note = (
+                f"; {latest_upstox_ingestion.chunks_skipped_cached} chunk(s) already cached, skipped"
+                if latest_upstox_ingestion.chunks_skipped_cached
+                else ""
+            )
             message = (
                 f"Upstox ingestion complete: {latest_upstox_ingestion.candles_saved} candles, "
-                f"{latest_upstox_ingestion.contracts_pulled} contracts{warning_note}"
+                f"{latest_upstox_ingestion.contracts_pulled} contracts{skipped_note}{warning_note}"
             )
             ok = True
         except (UpstoxDataError, ValueError) as exc:

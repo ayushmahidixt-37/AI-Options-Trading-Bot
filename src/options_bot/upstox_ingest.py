@@ -38,6 +38,7 @@ class IngestionSummary:
     candles_saved: int
     instruments_saved: int
     warnings: tuple[str, ...]
+    chunks_skipped_cached: int = 0
 
 
 def chunk_date_range(
@@ -204,12 +205,16 @@ def pull_range(
     underlying_key: str = NIFTY_UNDERLYING_KEY,
     rate_limiter: RateLimiter | None = None,
     observed_at: datetime | None = None,
+    force_refetch: bool = False,
 ) -> IngestionSummary:
     """Pull expired-option and underlying candles for ``[start, end]`` into the archive.
 
     Every write uses ``source="upstox"`` and reuses the archive's existing
     duplicate-safe ``INSERT OR IGNORE`` behavior, so re-running over an
-    overlapping range is always safe.
+    overlapping range is always safe. Unless ``force_refetch`` is set, any
+    date-chunk already archived for a given token is skipped entirely —
+    saving an Upstox API call for data we already have, not just avoiding a
+    duplicate write after the fact.
     """
     limiter = rate_limiter or RateLimiter()
     now = observed_at or datetime.now()
@@ -221,10 +226,16 @@ def pull_range(
     candles_saved = 0
     instruments_saved = 0
     contracts_pulled = 0
+    chunks_skipped_cached = 0
 
     for plan in plans:
         instruments_saved += archive.save_instruments([plan.instrument], now)
         for chunk_start, chunk_end in chunk_date_range(plan.pull_start, plan.pull_end, chunk_days):
+            if not force_refetch and archive.has_upstox_candles(
+                plan.expired_instrument_key, chunk_start, chunk_end
+            ):
+                chunks_skipped_cached += 1
+                continue
             limiter.wait()
             try:
                 raw_candles = client.get_expired_historical_candles(
@@ -246,6 +257,9 @@ def pull_range(
         contracts_pulled += 1
 
     for chunk_start, chunk_end in chunk_date_range(start, end, chunk_days):
+        if not force_refetch and archive.has_upstox_candles(underlying_key, chunk_start, chunk_end):
+            chunks_skipped_cached += 1
+            continue
         limiter.wait()
         try:
             raw_underlying = client.get_historical_candles_v3(
@@ -276,4 +290,5 @@ def pull_range(
         candles_saved=candles_saved,
         instruments_saved=instruments_saved,
         warnings=tuple(run_warnings),
+        chunks_skipped_cached=chunks_skipped_cached,
     )
