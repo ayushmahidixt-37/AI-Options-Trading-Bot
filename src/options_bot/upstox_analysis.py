@@ -304,6 +304,89 @@ def run_deep_analysis(
     )
 
 
+def _format_breakdown_section(title: str, breakdown: tuple[TradeBreakdown, ...]) -> list[str]:
+    lines = [title]
+    if not breakdown:
+        lines.append("  (no data)")
+    for item in breakdown:
+        if item.win_rate is None:
+            lines.append(f"  {item.label}: 0 trades")
+        else:
+            pnl_text = f"{item.average_net_pnl:.2f}" if item.average_net_pnl is not None else "n/a"
+            lines.append(
+                f"  {item.label}: {item.trades} trades, "
+                f"{item.win_rate * 100:.1f}% win rate, "
+                f"avg net P&L {pnl_text}"
+            )
+    lines.append("")
+    return lines
+
+
+def format_analysis_summary(report: DeepAnalysisReport) -> str:
+    """Render a full analysis report as plain text, meant to be pasted into a chat.
+
+    Includes every breakdown bucket (not just best/worst, unlike
+    ``highlights``) so a reader has full context, plus an explicit caution
+    about small sample sizes and the existing validation discipline — this
+    is a hypothesis-generation aid, not something to act on directly.
+    """
+    lines: list[str] = ["UPSTOX BACKTEST ANALYSIS SUMMARY"]
+    trades = report.overall.trade_details
+    if trades:
+        period_start = min(trade.signal_at for trade in trades).date()
+        period_end = max(trade.signal_at for trade in trades).date()
+        lines.append(f"Trade period covered: {period_start.isoformat()} to {period_end.isoformat()}")
+    lines.append("")
+    lines.append(
+        "Paste this into a chat with Claude and ask what to tune. Every "
+        "number below is a plain aggregate over already-computed trades — "
+        "no model, no fitting."
+    )
+    lines.append("")
+    lines.append("OVERALL")
+    lines.append(
+        f"Status: {report.overall.status} | Trades: {report.overall.trades} | "
+        f"Win rate: {report.overall.win_rate * 100:.1f}% | "
+        f"Net P&L: {report.overall.net_pnl:.2f} | "
+        f"Drawdown: {report.overall.max_drawdown:.2f}"
+    )
+    lines.append("")
+
+    lines.extend(_format_breakdown_section("BY TIME OF DAY", report.time_of_day))
+    lines.extend(_format_breakdown_section("BY DAY OF WEEK", report.day_of_week))
+    lines.extend(_format_breakdown_section("BY EXPIRY-DAY STATUS", report.expiry_day))
+    lines.extend(_format_breakdown_section("BY VOLATILITY REGIME", report.volatility_regime))
+
+    lines.append("BY STRATEGY VARIANT")
+    if not report.variants:
+        lines.append("  (no data)")
+    for variant in report.variants:
+        lines.append(
+            f"  {variant.name}: {variant.result.trades} trades, "
+            f"net P&L {variant.result.net_pnl:.2f}, "
+            f"drawdown {variant.result.max_drawdown:.2f}"
+        )
+    lines.append("")
+
+    lines.append("HIGHLIGHTS")
+    if not report.highlights:
+        lines.append("  (not enough distinct groups with trades yet)")
+    for item in report.highlights:
+        tag = " [PRELIMINARY]" if item.preliminary else ""
+        lines.append(f"  {item.headline}{tag}")
+        lines.append(f"    {item.evidence}")
+    lines.append("")
+
+    lines.append(
+        "CAUTION: sample sizes above are small. Do not treat any single "
+        "bucket as proven. Any suggested parameter change should be "
+        "validated on a separate, untouched date range before being "
+        "trusted, per this project's existing development/validation/test "
+        "split discipline."
+    )
+    return "\n".join(lines)
+
+
 def _compare_breakdown(
     dimension: str, breakdown: tuple[TradeBreakdown, ...], minimum_sample: int
 ) -> list[Suggestion]:

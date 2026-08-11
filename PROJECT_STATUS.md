@@ -13,7 +13,9 @@ real-device (Termux) findings have been fixed: a Cloudflare bot-block (HTTP
 documentation. Ingestion now tracks archive coverage and skips already-
 fetched date ranges automatically, and the deep-analysis view now surfaces
 plain-language best/worst highlights (even from a small sample, clearly
-marked preliminary) alongside the existing gated Suggestions. A real
+marked preliminary) alongside the existing gated Suggestions. The Highlights
+card now links to a plain-text "Copy analysis for Claude" export so the full
+breakdown can be pasted directly into a chat for tuning discussion. A real
 multi-month data pull is still pending the user's own Upstox Plus
 subscription/access token.
 **Production status:** Not approved for live trading
@@ -235,6 +237,14 @@ data-only: it must never place orders and is not a second trading broker.
   20-trade threshold the formal Suggestions section requires. This answers
   "what's going well/badly" even from a single small backtest, while the
   existing Suggestions section stays statistically gated and unchanged.
+- **"Copy analysis for Claude" plain-text export.** A new
+  `GET /upstox/analysis-summary.txt` route (linked from the Highlights card)
+  renders the full deep-analysis report — overall stats, every breakdown
+  bucket, variant comparison, and highlights, plus the same small-sample
+  caution — as plain text meant to be copy-pasted directly into a chat.
+  `format_analysis_summary()` in `upstox_analysis.py` does the rendering; it
+  is a pure formatter over already-computed data, not a new analysis path.
+  404s until a backtest has been run.
 
 ### Strategy research backlog — not active
 
@@ -413,3 +423,8 @@ At the end of every development session, update this file when applicable:
   gated Suggestions, in response to direct user feedback that repeat pulls
   wasted API calls and that the analysis view gave no visible feedback
   until 20+ trades accumulated.
+- Added a "Copy analysis for Claude" plain-text export
+  (`GET /upstox/analysis-summary.txt`) so the full deep-analysis breakdown
+  can be pasted directly into a chat for tuning discussion, in response to
+  direct user feedback that they wanted an easy way to hand over analysis
+  results for parameter-change suggestions.

@@ -516,3 +516,40 @@ def test_upstox_backtest_reports_insufficient_data_and_csv_is_404_until_run(tmp_
     assert "Historical backtest (Upstox)" in backtest.text
     assert "INSUFFICIENT DATA" in backtest.text
     assert client.get("/upstox/trades.csv", auth=auth()).status_code == 404
+
+
+def test_upstox_analysis_summary_is_404_until_backtest_then_returns_plain_text(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import options_bot.web as web_module
+    from options_bot.backtest import BacktestResult
+    from options_bot.upstox_analysis import DeepAnalysisReport
+
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    fake_result = BacktestResult("VALIDATION READY", 1, 1, 0, 100.0, 1.0, 100.0, 0.0, 100.0, None, "ok")
+    fake_report = DeepAnalysisReport(
+        overall=fake_result,
+        time_of_day=(),
+        day_of_week=(),
+        expiry_day=(),
+        volatility_regime=(),
+        variants=(),
+    )
+    monkeypatch.setattr(web_module, "run_deep_analysis", lambda archive, **kwargs: fake_report)
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    assert client.get("/upstox/analysis-summary.txt", auth=auth()).status_code == 404
+
+    client.post("/actions/upstox-backtest", auth=auth())
+    summary = client.get("/upstox/analysis-summary.txt", auth=auth())
+
+    assert summary.status_code == 200
+    assert summary.headers["content-type"].startswith("text/plain")
+    assert "UPSTOX BACKTEST ANALYSIS SUMMARY" in summary.text
+    assert "Status: VALIDATION READY" in summary.text
