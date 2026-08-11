@@ -292,7 +292,7 @@ def run_momentum_backtest(
                 )
             )
 
-    return build_backtest_result(trades, archive, settings, trading_days)
+    return build_backtest_result(trades, archive, settings, trading_days, source="angel-one")
 
 
 def build_backtest_result(
@@ -300,8 +300,14 @@ def build_backtest_result(
     archive: MarketArchive,
     settings: Settings | None,
     trading_days: int,
+    source: str = "angel-one",
 ) -> BacktestResult:
-    """Aggregate trades into a ``BacktestResult``, shared by every replay engine."""
+    """Aggregate trades into a ``BacktestResult``, shared by every replay engine.
+
+    ``source`` scopes the data-quality gap check to the engine's own data
+    (``"angel-one"`` or ``"upstox"``) so a gap in one source never marks the
+    other source's backtest status as impaired.
+    """
     if not trades:
         return BacktestResult(
             "INSUFFICIENT DATA",
@@ -330,7 +336,7 @@ def build_backtest_result(
     losses = abs(sum(value for value in net_values if value < 0))
     profit_factor = gains / losses if losses else None
     fees_paid = len(trades) * 2 * settings.paper_fee_per_order if settings else 0.0
-    gaps = sum(int(item["gaps"]) for item in archive.gap_summary())
+    gaps = sum(int(item["gaps"]) for item in archive.gap_summary(source))
     status = (
         "VALIDATION READY"
         if trading_days >= 20 and len(trades) >= 30 and gaps == 0

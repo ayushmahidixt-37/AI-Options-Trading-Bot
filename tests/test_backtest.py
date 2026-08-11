@@ -14,6 +14,7 @@ from options_bot.candles import Candle
 from options_bot.config import Settings
 from options_bot.domain import Instrument
 from options_bot.market_archive import MarketArchive
+from options_bot.upstox_data import UpstoxCandle
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -92,6 +93,47 @@ def test_offline_backtest_uses_next_option_open_without_network(tmp_path) -> Non
     report = export_backtest_csv(result, tmp_path / "trades.csv")
     assert "exit_reason" in report.read_text(encoding="utf-8")
     assert "signal-reversal" in report.read_text(encoding="utf-8")
+
+
+def test_momentum_backtest_status_ignores_upstox_sourced_gaps(tmp_path) -> None:
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+    archive.save_instruments(
+        [
+            Instrument(
+                "NIFTY13AUG2624600CE", "CE1", "NFO", "NIFTY", "CE", 75, date(2026, 8, 13), 24600
+            )
+        ],
+        start,
+    )
+    archive.save_observation(start, observation("BULLISH"))
+    archive.save_candles(
+        [Candle("NIFTY13AUG2624600CE", start + timedelta(minutes=5), 100, 108, 99, 106)],
+        token="CE1",
+        exchange="NFO",
+        timeframe="FIVE_MINUTE",
+        collected_at=start + timedelta(minutes=10),
+    )
+    # A real gap, but in Upstox-sourced data -- must never affect Angel status.
+    archive.save_upstox_candles(
+        [
+            UpstoxCandle("NIFTY", start, 100, 103, 99, 102),
+            UpstoxCandle("NIFTY", start + timedelta(minutes=20), 102, 104, 101, 103),
+        ],
+        token="NSE_INDEX|Nifty 50",
+        exchange="NSE_INDEX",
+        timeframe="FIVE_MINUTE",
+        collected_at=start + timedelta(minutes=20),
+    )
+    settings = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3")}
+    )
+
+    result = run_momentum_backtest(archive, settings=settings)
+
+    assert result.data_gaps == 0
+    assert result.status != "DATA QUALITY WARNING"
 
 
 def test_backtest_reports_insufficient_archive(tmp_path) -> None:

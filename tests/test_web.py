@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -553,3 +553,172 @@ def test_upstox_analysis_summary_is_404_until_backtest_then_returns_plain_text(
     assert summary.headers["content-type"].startswith("text/plain")
     assert "UPSTOX BACKTEST ANALYSIS SUMMARY" in summary.text
     assert "Status: VALIDATION READY" in summary.text
+
+
+def test_upstox_custom_backtest_is_disabled_by_default(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+
+    result = client.post("/actions/upstox-custom-backtest", auth=auth())
+
+    assert "UPSTOX_BACKTEST_ENABLED=true" in result.text
+    assert client.get("/upstox/custom-trades.csv", auth=auth()).status_code == 404
+    assert client.get("/upstox/custom-analysis-summary.txt", auth=auth()).status_code == 404
+
+
+def test_upstox_custom_backtest_parses_form_fields_into_parameters(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import options_bot.web as web_module
+    from options_bot.backtest import BacktestParameters, BacktestResult, OptionBacktestTrade
+    from options_bot.upstox_analysis import DeepAnalysisReport
+
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    fake_trade = OptionBacktestTrade(
+        signal_at=datetime(2026, 7, 1, 10, 0, tzinfo=IST),
+        direction="BULLISH",
+        token="NSE_FO|1|31-12-2026",
+        symbol="NIFTY CE",
+        entry_at=datetime(2026, 7, 1, 10, 5, tzinfo=IST),
+        entry_price=100.0,
+        stop_price=90.0,
+        exit_at=datetime(2026, 7, 1, 10, 10, tzinfo=IST),
+        exit_price=101.0,
+        exit_reason="force-exit",
+        units=75,
+        gross_pnl=75.0,
+        fees=40.0,
+        net_pnl=35.0,
+        raw_points=1.0,
+    )
+    fake_result = BacktestResult(
+        "PRELIMINARY", 3, 1, 2, 10.0, 0.33, 100.0, 0.0, 50.0, None, "ok", (fake_trade,)
+    )
+    fake_report = DeepAnalysisReport(
+        overall=fake_result,
+        time_of_day=(),
+        day_of_week=(),
+        expiry_day=(),
+        volatility_regime=(),
+        variants=(),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_deep_analysis(archive, **kwargs):
+        captured.update(kwargs)
+        return fake_report
+
+    monkeypatch.setattr(web_module, "run_deep_analysis", fake_run_deep_analysis)
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    result = client.post(
+        "/actions/upstox-custom-backtest",
+        data={
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-28",
+            "maximum_hold_minutes": "30",
+            "target_return_pct": "20",
+            "trailing_stop_pct": "10",
+            "no_stop_cap": "true",
+            "exclude_expiry_day": "true",
+            "entry_start": "09:30",
+            "entry_end": "12:00",
+            "weekday_tuesday": "true",
+            "weekday_thursday": "true",
+        },
+        auth=auth(),
+    )
+
+    assert "Custom Upstox backtest completed" in result.text
+    parameters = captured["variants"][0]
+    assert isinstance(parameters, BacktestParameters)
+    assert parameters.stop_risk_fraction is None
+    assert parameters.maximum_hold_minutes == 30
+    assert parameters.target_return == 0.2
+    assert parameters.trailing_stop == 0.1
+    assert parameters.exclude_expiry_day is True
+    assert parameters.entry_start.strftime("%H:%M") == "09:30"
+    assert parameters.entry_end.strftime("%H:%M") == "12:00"
+    assert parameters.allowed_weekdays == (1, 3)
+
+    assert client.get("/upstox/custom-trades.csv", auth=auth()).status_code == 200
+    summary = client.get("/upstox/custom-analysis-summary.txt", auth=auth())
+    assert summary.status_code == 200
+    assert "UPSTOX BACKTEST ANALYSIS SUMMARY" in summary.text
+
+
+def test_upstox_validation_is_disabled_by_default(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+
+    result = client.post(
+        "/actions/upstox-validation",
+        data={
+            "development_start": "2026-06-01",
+            "development_end": "2026-06-10",
+            "validation_start": "2026-06-11",
+            "validation_end": "2026-06-20",
+            "test_start": "2026-06-21",
+            "test_end": "2026-06-30",
+        },
+        auth=auth(),
+    )
+
+    assert "UPSTOX_BACKTEST_ENABLED=true" in result.text
+    assert client.get("/upstox/validation.csv", auth=auth()).status_code == 404
+
+
+def test_upstox_validation_uses_run_upstox_backtest_as_the_runner(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import options_bot.web as web_module
+    from options_bot.upstox_backtest import run_upstox_backtest
+    from options_bot.validation import ValidationReport
+
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    fake_report = ValidationReport(
+        "PRELIMINARY",
+        "Baseline",
+        (),
+        "warning",
+        (date(2026, 6, 1), date(2026, 6, 10)),
+        (date(2026, 6, 11), date(2026, 6, 20)),
+        (date(2026, 6, 21), date(2026, 6, 30)),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_strategy_validation(archive, settings, **kwargs):
+        captured.update(kwargs)
+        return fake_report
+
+    monkeypatch.setattr(web_module, "run_strategy_validation", fake_run_strategy_validation)
+    client = TestClient(create_web_app(cfg, "secret"))
+
+    assert client.get("/upstox/validation.csv", auth=auth()).status_code == 404
+
+    result = client.post(
+        "/actions/upstox-validation",
+        data={
+            "development_start": "2026-06-01",
+            "development_end": "2026-06-10",
+            "validation_start": "2026-06-11",
+            "validation_end": "2026-06-20",
+            "test_start": "2026-06-21",
+            "test_end": "2026-06-30",
+        },
+        auth=auth(),
+    )
+
+    assert "Upstox strategy validation completed" in result.text
+    assert captured["runner"] is run_upstox_backtest
+    assert client.get("/upstox/validation.csv", auth=auth()).status_code == 200

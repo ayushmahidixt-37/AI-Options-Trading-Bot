@@ -328,6 +328,30 @@ not simultaneous margin: positions never overlap (one at a time), so it's
 the sum of money moved across the whole period, not a peak concurrent
 exposure.
 
+`MarketArchive.gap_summary()` takes a `source` parameter (default
+`"angel-one"`) so Angel and Upstox data-quality gaps are never conflated —
+a gap in one source no longer marks the other source's backtest status as
+`DATA QUALITY WARNING`. `build_backtest_result()` threads the right source
+through automatically from each engine.
+
+The Historical Backtest (Upstox) tab has a **"Custom parameters"** card
+exposing every tunable `BacktestParameters` field as form inputs (stop-loss
+width or no-cap, max hold minutes, profit target %, trailing stop %, RSI
+thresholds, minimum ATR, entry window, expiry-day exclusion, allowed
+weekdays). Submitting runs `run_deep_analysis(..., variants=(custom,))`
+immediately over your already-pulled data — no code change per attempt —
+and the form re-populates with the last submitted values. It's a fast,
+ungated exploration loop by design: a combination worth trusting graduates
+by being added as a permanent named entry in `STRATEGY_VARIANTS`.
+
+The tab also has a **"Strategy validation (Upstox)"** card wired to the
+same development/validation/untouched-test split used for Angel data,
+via `run_strategy_validation(..., runner=run_upstox_backtest)`. This closes
+a gap where that injectable `runner` existed but no dashboard route ever
+passed `run_upstox_backtest` through it, so the rigorous split was
+Angel-only in practice. Use this to confirm a variant that looked good in
+Custom Parameters actually holds up on data it wasn't picked from.
+
 ## Tests
 
 ```bash

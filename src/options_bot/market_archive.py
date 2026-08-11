@@ -364,13 +364,19 @@ class MarketArchive:
             ).fetchone()
         return datetime.fromisoformat(row[0]) if row and row[0] else None
 
-    def gap_summary(self) -> list[dict[str, object]]:
-        """Describe internal same-session gaps grouped by archived instrument."""
+    def gap_summary(self, source: str = "angel-one") -> list[dict[str, object]]:
+        """Describe internal same-session gaps grouped by archived instrument.
+
+        Scoped to a single ``source`` (default ``"angel-one"``) so Upstox and
+        Angel data quality are never conflated -- a real gap in one source
+        must not mark the other source's backtests as data-quality-impaired.
+        """
         with self.connect() as con:
             rows = con.execute(
                 """SELECT instrument_token, symbol, started_at FROM market_candles
-                   WHERE timeframe='FIVE_MINUTE'
-                   ORDER BY instrument_token, started_at"""
+                   WHERE timeframe='FIVE_MINUTE' AND source=?
+                   ORDER BY instrument_token, started_at""",
+                (source,),
             ).fetchall()
         grouped: dict[tuple[str, str], list[datetime]] = {}
         for row in rows:

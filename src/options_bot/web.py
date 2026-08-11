@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse
@@ -12,7 +12,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
 from .actions import close_paper_position_action, run_health_action, run_paper_scan_action, status_snapshot
-from .backtest import BacktestResult, export_backtest_csv, run_momentum_backtest
+from .backtest import BacktestParameters, BacktestResult, export_backtest_csv, run_momentum_backtest
 from .connections import ConnectionActionError, ConnectionManager, PaperTradeProposal
 from .credentials import load_credentials
 from .domain import PaperOrderRequest
@@ -27,6 +27,7 @@ from .upstox_analysis import (
     generate_suggestions,
     run_deep_analysis,
 )
+from .upstox_backtest import run_upstox_backtest
 from .upstox_data import UpstoxClient, UpstoxDataError
 from .upstox_ingest import NIFTY_UNDERLYING_KEY, IngestionSummary, pull_range
 from .validation import ValidationReport, export_validation_csv, run_strategy_validation
@@ -35,6 +36,21 @@ from .readiness import (
     export_readiness_csv,
     save_manual_review,
 )
+
+
+def _parse_optional_float(value: str) -> float | None:
+    value = value.strip()
+    return float(value) if value else None
+
+
+def _parse_optional_int(value: str) -> int | None:
+    value = value.strip()
+    return int(value) if value else None
+
+
+def _parse_optional_time(value: str) -> time | None:
+    value = value.strip()
+    return time.fromisoformat(value) if value else None
 
 security = HTTPBasic()
 TEMPLATE_DIR = Path(__file__).with_name("templates")
@@ -79,6 +95,9 @@ def create_web_app(
     latest_validation: ValidationReport | None = None
     latest_upstox_ingestion: IngestionSummary | None = None
     latest_upstox_analysis: DeepAnalysisReport | None = None
+    latest_upstox_custom_analysis: DeepAnalysisReport | None = None
+    latest_upstox_custom_parameters: BacktestParameters | None = None
+    latest_upstox_validation: ValidationReport | None = None
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -168,6 +187,9 @@ def create_web_app(
             "upstox_suggestions": (
                 generate_suggestions(latest_upstox_analysis) if latest_upstox_analysis else ()
             ),
+            "upstox_custom_analysis": latest_upstox_custom_analysis,
+            "upstox_custom_parameters": latest_upstox_custom_parameters,
+            "upstox_validation": latest_upstox_validation,
             "message": message,
             "ok": ok,
         }
@@ -194,6 +216,8 @@ def create_web_app(
             "strategy-validation": "research",
             "upstox-ingest": "backtesting-upstox",
             "upstox-backtest": "backtesting-upstox",
+            "upstox-custom-backtest": "backtesting-upstox",
+            "upstox-validation": "backtesting-upstox",
             "angel-connect": "operations",
             "nifty-refresh": "operations",
             "instruments-refresh": "operations",
@@ -476,6 +500,154 @@ def create_web_app(
         if latest_upstox_analysis is None:
             raise HTTPException(status_code=404, detail="Run an Upstox backtest first")
         return PlainTextResponse(format_analysis_summary(latest_upstox_analysis))
+
+    @app.post("/actions/upstox-custom-backtest", response_class=HTMLResponse)
+    def run_upstox_custom_backtest_action(
+        request: Request,
+        start_date: str = Form(""),
+        end_date: str = Form(""),
+        stop_risk_fraction: str = Form(""),
+        no_stop_cap: bool = Form(False),
+        maximum_hold_minutes: str = Form(""),
+        target_return_pct: str = Form(""),
+        trailing_stop_pct: str = Form(""),
+        bullish_rsi_min: str = Form(""),
+        bearish_rsi_max: str = Form(""),
+        minimum_atr: str = Form(""),
+        exclude_expiry_day: bool = Form(False),
+        entry_start: str = Form(""),
+        entry_end: str = Form(""),
+        weekday_monday: bool = Form(False),
+        weekday_tuesday: bool = Form(False),
+        weekday_wednesday: bool = Form(False),
+        weekday_thursday: bool = Form(False),
+        weekday_friday: bool = Form(False),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        nonlocal latest_upstox_custom_analysis, latest_upstox_custom_parameters
+        try:
+            if not settings.upstox_enabled:
+                raise UpstoxDataError(
+                    "Upstox backtesting is disabled. Set UPSTOX_BACKTEST_ENABLED=true to use this tab."
+                )
+            start = date.fromisoformat(start_date) if start_date else None
+            end = date.fromisoformat(end_date) if end_date else None
+            if start and end and start > end:
+                raise ValueError("Start date must not be after end date")
+            weekdays = tuple(
+                index
+                for index, checked in enumerate(
+                    (
+                        weekday_monday,
+                        weekday_tuesday,
+                        weekday_wednesday,
+                        weekday_thursday,
+                        weekday_friday,
+                    )
+                )
+                if checked
+            ) or None
+            target_return = _parse_optional_float(target_return_pct)
+            trailing_stop = _parse_optional_float(trailing_stop_pct)
+            parameters = BacktestParameters(
+                name="Custom",
+                bullish_rsi_min=_parse_optional_float(bullish_rsi_min),
+                bearish_rsi_max=_parse_optional_float(bearish_rsi_max),
+                minimum_atr=_parse_optional_float(minimum_atr),
+                entry_start=_parse_optional_time(entry_start),
+                entry_end=_parse_optional_time(entry_end),
+                exclude_expiry_day=exclude_expiry_day,
+                stop_risk_fraction=(
+                    None
+                    if no_stop_cap
+                    else (_parse_optional_float(stop_risk_fraction) or 0.8)
+                ),
+                maximum_hold_minutes=_parse_optional_int(maximum_hold_minutes),
+                target_return=(target_return / 100 if target_return is not None else None),
+                trailing_stop=(trailing_stop / 100 if trailing_stop is not None else None),
+                allowed_weekdays=weekdays,
+            )
+            latest_upstox_custom_parameters = parameters
+            latest_upstox_custom_analysis = run_deep_analysis(
+                connections.archive, start=start, end=end, settings=settings, variants=(parameters,)
+            )
+            overall = latest_upstox_custom_analysis.overall
+            message = "Custom Upstox backtest completed" if overall.trades else overall.reason
+            ok = overall.trades > 0
+        except (UpstoxDataError, ValueError) as exc:
+            latest_upstox_custom_analysis = None
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
+        )
+
+    @app.get("/upstox/custom-trades.csv", response_class=FileResponse)
+    def download_upstox_custom_backtest(_user: str = Depends(require_login)) -> FileResponse:
+        if (
+            latest_upstox_custom_analysis is None
+            or not latest_upstox_custom_analysis.overall.trade_details
+        ):
+            raise HTTPException(status_code=404, detail="Run a custom Upstox backtest first")
+        target = settings.data_dir / "exports" / "upstox-custom-backtest-trades.csv"
+        export_backtest_csv(latest_upstox_custom_analysis.overall, target)
+        return FileResponse(target, filename=target.name, media_type="text/csv")
+
+    @app.get("/upstox/custom-analysis-summary.txt", response_class=PlainTextResponse)
+    def download_upstox_custom_analysis_summary(
+        _user: str = Depends(require_login),
+    ) -> PlainTextResponse:
+        if latest_upstox_custom_analysis is None:
+            raise HTTPException(status_code=404, detail="Run a custom Upstox backtest first")
+        return PlainTextResponse(format_analysis_summary(latest_upstox_custom_analysis))
+
+    @app.post("/actions/upstox-validation", response_class=HTMLResponse)
+    def run_upstox_validation(
+        request: Request,
+        development_start: str = Form(),
+        development_end: str = Form(),
+        validation_start: str = Form(),
+        validation_end: str = Form(),
+        test_start: str = Form(),
+        test_end: str = Form(),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        nonlocal latest_upstox_validation
+        try:
+            if not settings.upstox_enabled:
+                raise UpstoxDataError(
+                    "Upstox backtesting is disabled. Set UPSTOX_BACKTEST_ENABLED=true to use this tab."
+                )
+            latest_upstox_validation = run_strategy_validation(
+                connections.archive,
+                settings,
+                development_start=date.fromisoformat(development_start),
+                development_end=date.fromisoformat(development_end),
+                validation_start=date.fromisoformat(validation_start),
+                validation_end=date.fromisoformat(validation_end),
+                test_start=date.fromisoformat(test_start),
+                test_end=date.fromisoformat(test_end),
+                runner=run_upstox_backtest,
+            )
+            message = f"Upstox strategy validation completed · {latest_upstox_validation.status}"
+            ok = True
+        except (UpstoxDataError, ValueError) as exc:
+            latest_upstox_validation = None
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
+        )
+
+    @app.get("/upstox/validation.csv", response_class=FileResponse)
+    def download_upstox_validation(_user: str = Depends(require_login)) -> FileResponse:
+        if latest_upstox_validation is None:
+            raise HTTPException(status_code=404, detail="Run Upstox strategy validation first")
+        target = settings.data_dir / "exports" / "upstox-strategy-validation.csv"
+        export_validation_csv(latest_upstox_validation, target)
+        return FileResponse(target, filename=target.name, media_type="text/csv")
 
     @app.post("/actions/readiness-review", response_class=HTMLResponse)
     def update_readiness_review(
