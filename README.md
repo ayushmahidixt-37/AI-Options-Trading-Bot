@@ -317,6 +317,17 @@ underlying signal quality actually is. `STRATEGY_VARIANTS` includes a
 `"No stop-loss cap"` entry so this is always visible in the deep-analysis
 variant comparison.
 
+`BacktestResult` also exposes `capital_deployed_total`,
+`capital_deployed_average`, and `return_on_capital_pct` — read-only
+properties derived purely from `trade_details` (sum/mean of entry premium,
+and net P&L as a percentage of total capital deployed). Shown next to Net
+P&L and Drawdown on both the offline-backtest and Upstox-backtest cards,
+and in the "Copy analysis for Claude" export, so a raw rupee P&L figure can
+be judged against how much capital produced it. This is turnover capital,
+not simultaneous margin: positions never overlap (one at a time), so it's
+the sum of money moved across the whole period, not a peak concurrent
+exposure.
+
 ## Tests
 
 ```bash

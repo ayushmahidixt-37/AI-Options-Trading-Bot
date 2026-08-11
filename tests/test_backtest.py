@@ -3,7 +3,13 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from options_bot.backtest import BacktestParameters, export_backtest_csv, run_momentum_backtest
+from options_bot.backtest import (
+    BacktestParameters,
+    BacktestResult,
+    OptionBacktestTrade,
+    export_backtest_csv,
+    run_momentum_backtest,
+)
 from options_bot.candles import Candle
 from options_bot.config import Settings
 from options_bot.domain import Instrument
@@ -173,3 +179,41 @@ def test_stop_risk_fraction_none_disables_the_price_based_stop(tmp_path) -> None
     assert trade.exit_reason != "stop"
     assert trade.exit_reason != "stop-gap"
     assert trade.stop_price == 0.0
+
+
+def _trade(entry_price: float, units: int, net_pnl: float) -> OptionBacktestTrade:
+    start = datetime(2026, 8, 6, 10, 0, tzinfo=IST)
+    return OptionBacktestTrade(
+        signal_at=start,
+        direction="BULLISH",
+        token="CE1",
+        symbol="NIFTY CE",
+        entry_at=start,
+        entry_price=entry_price,
+        stop_price=0.0,
+        exit_at=start + timedelta(minutes=5),
+        exit_price=entry_price + net_pnl / units,
+        exit_reason="force-exit",
+        units=units,
+        gross_pnl=net_pnl,
+        fees=0.0,
+        net_pnl=net_pnl,
+        raw_points=net_pnl / units,
+    )
+
+
+def test_capital_deployed_and_return_on_capital_are_derived_from_trade_details() -> None:
+    trades = (_trade(100.0, 75, 300.0), _trade(50.0, 75, -150.0))
+    result = BacktestResult("PRELIMINARY", 2, 1, 1, 2.0, 0.5, 150.0, 40.0, 150.0, 2.0, "reason", trades)
+
+    assert result.capital_deployed_total == 100.0 * 75 + 50.0 * 75
+    assert result.capital_deployed_average == result.capital_deployed_total / 2
+    assert result.return_on_capital_pct == round(150.0 / result.capital_deployed_total * 100, 2)
+
+
+def test_capital_deployed_and_return_on_capital_are_zero_or_none_without_trades() -> None:
+    result = BacktestResult("INSUFFICIENT DATA", 0, 0, 0, 0.0, 0.0, 0.0, 0.0, 0.0, None, "n/a")
+
+    assert result.capital_deployed_total == 0.0
+    assert result.capital_deployed_average == 0.0
+    assert result.return_on_capital_pct is None

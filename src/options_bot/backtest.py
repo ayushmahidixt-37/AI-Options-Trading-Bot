@@ -70,6 +70,27 @@ class BacktestResult:
     trading_days: int = 0
     data_gaps: int = 0
 
+    @property
+    def capital_deployed_total(self) -> float:
+        """Sum of entry premium (entry_price × units) across all trades.
+
+        Positions are opened one at a time (never overlapping), so this is
+        total rupees turned over across the period, not simultaneous margin.
+        """
+        return round(sum(trade.entry_price * trade.units for trade in self.trade_details), 2)
+
+    @property
+    def capital_deployed_average(self) -> float:
+        if not self.trade_details:
+            return 0.0
+        return round(self.capital_deployed_total / len(self.trade_details), 2)
+
+    @property
+    def return_on_capital_pct(self) -> float | None:
+        if not self.capital_deployed_total:
+            return None
+        return round(self.net_pnl / self.capital_deployed_total * 100, 2)
+
 
 @dataclass(frozen=True)
 class OptionBacktestTrade:
