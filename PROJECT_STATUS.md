@@ -4,7 +4,7 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-11
+**Last updated:** 2026-08-12
 **Current phase:** Forward paper evidence collection and validation review;
 Upstox historical-backtesting feature complete and merged to `main`. Two
 real-device (Termux) findings have been fixed: a Cloudflare bot-block (HTTP
@@ -15,9 +15,27 @@ fetched date ranges automatically, and the deep-analysis view now surfaces
 plain-language best/worst highlights (even from a small sample, clearly
 marked preliminary) alongside the existing gated Suggestions. The Highlights
 card now links to a plain-text "Copy analysis for Claude" export so the full
-breakdown can be pasted directly into a chat for tuning discussion. A real
-multi-month data pull is still pending the user's own Upstox Plus
-subscription/access token.
+breakdown can be pasted directly into a chat for tuning discussion.
+
+A real 7-month Upstox archive (Jan-Jul 2026) has now been pulled and
+analyzed end-to-end through the development/validation/test-range
+discipline. **See `BACKTEST_FINDINGS.md` for the detailed, dated log of
+every backtest round, what was confirmed, what was rejected, and why** —
+this file only carries the headline. Current headline: "Morning entries"
+(09:30-12:00 entry window) is the most promising lead so far (+1,064.90
+net P&L, 5,994 drawdown, 31 trades on the Jun-Jul range) but is labeled
+**Exploratory, not Confirmed** — that Jun-Jul range had already been
+touched by an earlier full-range pass before the split ran, and was
+reused again afterward to compare morning-window variants, so it doesn't
+meet this project's bar for a clean, untouched confirmation. A genuinely
+fresh, never-yet-analyzed period is needed before treating it as more
+than a lead. Three ideas are rejected with real confidence, on grounds
+unaffected by that caveat (repeated across independent sample sizes, or
+a plain development-vs-validation reversal, not a test-range claim):
+tighter stop-loss, 10% trailing stop, and removing the stop-loss cap
+entirely (the last one is a clean textbook overfitting example —
+best-looking backward result of anything tried, worst-performing forward
+result of anything tried).
 **Production status:** Not approved for live trading
 
 ## Objective
@@ -218,10 +236,10 @@ data-only: it must never place orders and is not a second trading broker.
   (listing the actual fields present) instead of a raw `KeyError` if a
   future response shape doesn't match either name — covered by regression
   tests for both the fallback and the diagnostic-error path.
-- A real multi-month pull against live Upstox data has still not been
-  completed — that requires the user's own Upstox Plus subscription and
-  enough real testing time; the connection and discovery steps are now
-  confirmed working end-to-end on a real device, though.
+- A real 7-month pull against live Upstox data (Jan-Jul 2026) has been
+  completed and analyzed end-to-end, including the full
+  development/validation/untouched-test discipline. See
+  `BACKTEST_FINDINGS.md` for the detailed log.
 - **Ingestion tracks archive coverage and skips already-fetched data.**
   `MarketArchive.has_upstox_candles()`/`upstox_coverage_ranges()` let
   `pull_range()` skip any date-chunk already archived for a token instead of
@@ -483,9 +501,7 @@ At the end of every development session, update this file when applicable:
   `instrument_key` where their own docs inconsistently say
   `expired_instrument_key` — the client now accepts either. The Upstox
   historical-backtesting feature is feature-complete end-to-end and its
-  connection/discovery steps are confirmed live; a real multi-month data
-  pull is still pending the user's own Upstox Plus subscription/access
-  token and testing time.
+  connection/discovery steps are confirmed live.
 - Added coverage-aware ingestion (skip already-fetched date ranges unless
   explicitly forced) and plain-language "Highlights" alongside the existing
   gated Suggestions, in response to direct user feedback that repeat pulls
@@ -496,3 +512,10 @@ At the end of every development session, update this file when applicable:
   can be pasted directly into a chat for tuning discussion, in response to
   direct user feedback that they wanted an easy way to hand over analysis
   results for parameter-change suggestions.
+- **A real 7-month Upstox archive (Jan-Jul 2026) was pulled and analyzed
+  end-to-end** — full development/validation/untouched-test discipline,
+  not just a single-range look. New `BACKTEST_FINDINGS.md` is the detailed,
+  dated log of every round; this file only carries the headline (see the
+  top of this document). Started a dedicated documentation discipline:
+  every future backtest round gets a dated entry there — confirmed,
+  rejected, or open — so nothing gets re-tested or re-forgotten.
