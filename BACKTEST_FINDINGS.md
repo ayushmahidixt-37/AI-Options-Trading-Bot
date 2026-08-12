@@ -112,11 +112,27 @@ Baseline (91 of 277 signals fall in that window across the full 7
 months), and 31 test trades is a real but modest sample even setting the
 leakage concern aside. Not a live-default change candidate yet.
 
-**Rejected — repeated failure across multiple sample sizes (56, 121, and
-277 trades, three separate real backtests over this project's history):**
-Tighter stop-loss (0.6 fraction) and 10% trailing stop. Both looked
-promising on a small sample early on and got worse every time the sample
-grew. Do not re-test these without new evidence.
+**Rejected — repeated failure across multiple sample sizes.** Full,
+auditable numbers from every round this claim is based on (all single-
+range full-archive passes, not split runs — same caveat as the pass
+above applies, these are exploratory-level evidence individually, but
+the *trend across four independent rounds* is the actual finding):
+
+| Round | Trades | Baseline net P&L | Tighter stop net P&L | 10% trailing stop net P&L |
+|---|---|---|---|---|
+| 2026-07-13 to 2026-07-17 | 11 | +204.15 | +921.10 (better) | +3,875.35 (much better) |
+| 2026-07-01 to 2026-07-28 | 56 | -7,966.50 | -8,141.35 (worse) | -928.30 (better, still negative) |
+| 2026-06-01 to 2026-07-28 | 121 | -3,799.35 | -8,559.30 (worse) | -5,516.65 (worse) |
+| 2026-01-01 to 2026-07-31 | 277 | +15,400.35 | -490.20 (worse) | +922.25 (worse) |
+
+Tighter stop-loss: looked better than Baseline only at the smallest
+sample (11 trades), then underperformed Baseline in every subsequent,
+larger round (56, 121, 277 trades) — 3-for-3 once past the tiny first
+look. 10% trailing stop: also looked much better at 11 trades, was
+still better than Baseline (though negative) at 56, then underperformed
+Baseline at both 121 and 277 trades. Reject both; do not re-test without
+new evidence. "No stop-loss cap" was also catastrophic in every round it
+appeared in (-31,096.10 at both 56 and 121 trades, -17,717.15 at 277).
 
 **Rejected — clean overfitting example:** "No stop-loss cap" had the best
 development number of any variant tested (+27,432.85) and the worst
