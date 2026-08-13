@@ -8,6 +8,7 @@ import os
 import uvicorn
 from pathlib import Path
 
+from .backtest_cli import dispatch_backtest, register_backtest_parser
 from .config import ConfigurationError, Settings, load_env_file
 from .health import healthcheck
 from .runner import build_application
@@ -33,6 +34,7 @@ def parser() -> argparse.ArgumentParser:
     web = commands.add_parser("web")
     web.add_argument("--host", default="127.0.0.1")
     web.add_argument("--port", type=int, default=8000)
+    register_backtest_parser(commands)
     return root
 
 
@@ -43,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "validate-config":
             print("Configuration valid: paper mode, live disabled, auto-start disabled")
             return 0
+        if args.command == "backtest":
+            return dispatch_backtest(args)
         app = build_application(settings)
         if args.command == "init-db":
             print(f"Paper database initialized: {settings.database_path}")

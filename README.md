@@ -352,6 +352,29 @@ passed `run_upstox_backtest` through it, so the rigorous split was
 Angel-only in practice. Use this to confirm a variant that looked good in
 Custom Parameters actually holds up on data it wasn't picked from.
 
+### Backtest research pipeline (`options-bot backtest`, `research/`)
+
+A non-interactive CLI (`src/options_bot/backtest_cli.py`) and a
+machine-readable range-usage ledger (`src/options_bot/research_ledger.py`,
+a new `range_usage` table in the same archive database) exist so a
+backtest can be proposed and run without a human at the dashboard —
+infrastructure for a planned 5-role automated research loop (idea,
+validate, run, evaluate, digest; role prompt templates live under
+`research/prompts/`). `options-bot backtest check-range/run/validate-split/
+ledger` wraps `run_upstox_backtest` with a check-before-run,
+record-after-run discipline: a proposed test range must start strictly
+after every range ever recorded for that underlying/timeframe (any
+candidate, any role — not just non-overlapping), and each candidate name
+gets exactly one test attempt. This exists because a review caught a real
+leakage bug where a "confirmed" finding had actually reused an
+already-touched range — the ledger makes that mechanically impossible
+going forward instead of relying on a human or an LLM catching it every
+time. `BACKTEST_FINDINGS.md` entries for a completed test must quote
+`classify_confirmation()`'s return value verbatim rather than a bot's own
+judgement (`AGENTS.md` rule 7). Still 100% read-only historical
+backtesting — no write access to live/forward-paper execution paths, and
+nothing it produces reaches `main` without the normal PR review process.
+
 ## Tests
 
 ```bash

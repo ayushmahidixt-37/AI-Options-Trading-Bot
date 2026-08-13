@@ -4,7 +4,7 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-12
+**Last updated:** 2026-08-13
 **Current phase:** Forward paper evidence collection and validation review;
 Upstox historical-backtesting feature complete and merged to `main`. Two
 real-device (Termux) findings have been fixed: a Cloudflare bot-block (HTTP
@@ -36,6 +36,21 @@ tighter stop-loss, 10% trailing stop, and removing the stop-loss cap
 entirely (the last one is a clean textbook overfitting example —
 best-looking backward result of anything tried, worst-performing forward
 result of anything tried).
+
+**New infrastructure: a machine-readable range-usage ledger and a
+non-interactive backtest CLI**, built to make the anti-overfitting
+discipline above structurally enforced rather than prose-only. See
+`src/options_bot/research_ledger.py`, `src/options_bot/backtest_cli.py`
+(`options-bot backtest check-range/run/validate-split/ledger`), and
+`research/` (role prompt templates for a planned 5-role automated
+research loop — idea, validate, run, evaluate, digest). The ledger
+mechanically refuses to let a "confirmed" label come from a reused date
+range or a candidate's second test attempt; see the module docstrings
+for the exact rule. This closes the gap that let the leakage bug above
+happen in the first place. Still 100% read-only historical backtesting —
+this infrastructure has no write access to live/forward-paper execution
+paths, and nothing it produces reaches `main` without the normal
+PR review process.
 **Production status:** Not approved for live trading
 
 ## Objective
@@ -364,6 +379,9 @@ period used for final testing.
 | Paper account, orders, journal, state | `.termux-data/paper.sqlite3` |
 | Market-data master archive | `.termux-data/market-data.sqlite3` |
 | Automatic archive backups | `.termux-data/backups/` |
+| Range-usage ledger (which date ranges were used for what — lives inside the same market-data archive, `range_usage` table) | `.termux-data/market-data.sqlite3` |
+| Range-usage ledger, human-readable export | `research/range_usage_ledger.json` |
+| Research pipeline role prompts | `research/prompts/` |
 
 SQLite files are the master records. CSV downloads are exports, not databases.
 Do not delete `.termux-data` during updates.
@@ -519,3 +537,18 @@ At the end of every development session, update this file when applicable:
   top of this document). Started a dedicated documentation discipline:
   every future backtest round gets a dated entry there — confirmed,
   rejected, or open — so nothing gets re-tested or re-forgotten.
+- **Added `src/options_bot/research_ledger.py` (a new `range_usage`
+  table) and `src/options_bot/backtest_cli.py` (`options-bot backtest
+  check-range/run/validate-split/ledger`), plus `research/` role prompt
+  templates, as infrastructure for a planned 5-role automated backtest
+  research loop.** Built in direct response to a review-caught leakage
+  bug: a "confirmed" result had actually reused an already-touched date
+  range. The ledger makes that mechanically impossible going forward — a
+  test range must start strictly after every range ever recorded for
+  that underlying/timeframe, and a candidate gets exactly one test
+  attempt — enforced in code (`check_range`/`record_usage`/
+  `classify_confirmation`), not by an LLM remembering correctly.
+  `AGENTS.md` rule 6 now points at this module as the mechanical
+  enforcement behind the existing logging requirement. Still 100%
+  read-only historical backtesting; no write access to live/forward-paper
+  execution paths.
