@@ -4,8 +4,9 @@ Exists so an automated research pipeline can run Upstox historical
 backtests from argv, without a human at the FastAPI dashboard. Every
 `run`/`validate-split` invocation checks the range-usage ledger
 (`research_ledger.py`) before touching the backtest engine and records
-the usage immediately after, as one atomic CLI call -- there is no
-window where a backtest can run without the ledger knowing about it.
+the usage immediately after -- for the scarce `test` role, the check and
+the reservation happen atomically (`reserve_test_range`) so a crash or a
+second concurrent caller can't both observe "allowed".
 
 Deliberately does not modify `upstox_backtest.py` or `validation.py`;
 all ledger awareness lives here only, keeping the already-tested
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from datetime import date, time
 from pathlib import Path
 
@@ -24,14 +26,20 @@ from .backtest import BacktestParameters, BacktestResult
 from .config import Settings
 from .market_archive import MarketArchive
 from .research_ledger import (
-    VALID_OUTCOME_LABELS,
+    CALLER_ASSIGNABLE_OUTCOME_LABELS,
     UsageRole,
     check_range,
     classify_confirmation,
+    compute_params_fingerprint,
     export_ledger_json,
+    finalize_test_reservation,
+    has_underlying_data,
+    initialize_ledger,
     record_usage,
+    reserve_test_range,
     research_context_for_evaluation,
     research_context_for_ideation,
+    verify_params_fingerprint,
 )
 from .upstox_backtest import run_upstox_backtest
 from .upstox_ingest import NIFTY_UNDERLYING_KEY
@@ -81,10 +89,18 @@ def _result_to_dict(result: BacktestResult) -> dict:
 
 
 def _settings_for_archive(archive_path: str) -> Settings:
+    """Real configured settings (environment, plus any `--config` file that
+    `cli.py` already merged into ``os.environ`` before dispatch), only
+    overriding the archive-derived paths. Building an isolated two-key
+    mapping instead would silently revert every fee/slippage/risk/timezone
+    assumption to `Settings` defaults, making CLI research results disagree
+    with dashboard and production runs.
+    """
     data_dir = Path(archive_path).parent
-    return Settings.from_env(
-        {"DATA_DIR": str(data_dir), "DATABASE_PATH": str(data_dir / "paper.sqlite3")}
-    )
+    overrides = dict(os.environ)
+    overrides["DATA_DIR"] = str(data_dir)
+    overrides.setdefault("DATABASE_PATH", str(data_dir / "paper.sqlite3"))
+    return Settings.from_env(overrides)
 
 
 def _write_json_out(path: str | None, payload: dict) -> None:
@@ -118,7 +134,7 @@ def register_backtest_parser(commands: argparse._SubParsersAction) -> None:
     run.add_argument("--end", required=True)
     run.add_argument("--params-json", required=True)
     run.add_argument("--force-override-reason")
-    run.add_argument("--outcome-label", choices=sorted(VALID_OUTCOME_LABELS))
+    run.add_argument("--outcome-label", choices=sorted(CALLER_ASSIGNABLE_OUTCOME_LABELS))
     run.add_argument("--json-out")
 
     split = backtest_commands.add_parser("validate-split")
@@ -128,10 +144,14 @@ def register_backtest_parser(commands: argparse._SubParsersAction) -> None:
     split.add_argument("--dev-end", required=True)
     split.add_argument("--val-start", required=True)
     split.add_argument("--val-end", required=True)
-    split.add_argument("--test-start", required=True)
-    split.add_argument("--test-end", required=True)
+    split.add_argument(
+        "--test-start",
+        help="Omit together with --test-end for a development/validation-only cycle "
+        "-- never invent a placeholder test range.",
+    )
+    split.add_argument("--test-end")
     split.add_argument("--force-override-reason")
-    split.add_argument("--outcome-label", choices=sorted(VALID_OUTCOME_LABELS))
+    split.add_argument("--outcome-label", choices=sorted(CALLER_ASSIGNABLE_OUTCOME_LABELS))
     split.add_argument("--json-out")
 
     ledger = backtest_commands.add_parser("ledger")
@@ -157,6 +177,7 @@ def dispatch_backtest(args: argparse.Namespace) -> int:
 def _do_check_range(args: argparse.Namespace) -> int:
     archive = MarketArchive(args.archive)
     archive.initialize()
+    initialize_ledger(archive)
     result = check_range(
         archive,
         candidate_name=args.candidate,
@@ -173,9 +194,19 @@ def _do_check_range(args: argparse.Namespace) -> int:
 def _do_run(args: argparse.Namespace) -> int:
     archive = MarketArchive(args.archive)
     archive.initialize()
+    initialize_ledger(archive)
     settings = _settings_for_archive(args.archive)
     role = UsageRole(args.role)
     start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
+
+    fingerprint = compute_params_fingerprint(args.params_json)
+    mismatch = verify_params_fingerprint(
+        archive, candidate_name=args.candidate, params_fingerprint=fingerprint
+    )
+    if mismatch:
+        print(json.dumps({"error": "params_mismatch", "reason": mismatch}, indent=2))
+        return 1
+
     check = check_range(
         archive,
         candidate_name=args.candidate,
@@ -188,17 +219,62 @@ def _do_run(args: argparse.Namespace) -> int:
     if not check.allowed and not args.force_override_reason:
         print(json.dumps({"error": "blocked", "reason": check.reason}, indent=2))
         return 1
+
     parameters = _params_from_json(args.params_json)
-    result = run_upstox_backtest(
-        archive,
-        start=start,
-        end=end,
-        settings=settings,
-        parameters=parameters,
-        underlying_key=args.underlying_key,
-        timeframe=args.timeframe,
-    )
-    try:
+
+    if role == UsageRole.TEST:
+        if not args.force_override_reason and not has_underlying_data(
+            archive, underlying_key=args.underlying_key, timeframe=args.timeframe, start=start, end=end
+        ):
+            print(
+                json.dumps(
+                    {
+                        "error": "test_data_unavailable",
+                        "reason": "no archived underlying candles in this range yet -- "
+                        "not spending a test attempt",
+                    },
+                    indent=2,
+                )
+            )
+            return 1
+        reservation = reserve_test_range(
+            archive,
+            candidate_name=args.candidate,
+            underlying_key=args.underlying_key,
+            timeframe=args.timeframe,
+            start=start,
+            end=end,
+            forced_override_reason=args.force_override_reason,
+            params_fingerprint=fingerprint,
+        )
+        if reservation is None:
+            print(
+                json.dumps(
+                    {"error": "blocked", "reason": "test range failed the ledger eligibility re-check"},
+                    indent=2,
+                )
+            )
+            return 1
+        result = run_upstox_backtest(
+            archive,
+            start=start,
+            end=end,
+            settings=settings,
+            parameters=parameters,
+            underlying_key=args.underlying_key,
+            timeframe=args.timeframe,
+        )
+        finalize_test_reservation(archive, reservation, outcome_label=args.outcome_label)
+    else:
+        result = run_upstox_backtest(
+            archive,
+            start=start,
+            end=end,
+            settings=settings,
+            parameters=parameters,
+            underlying_key=args.underlying_key,
+            timeframe=args.timeframe,
+        )
         record_usage(
             archive,
             candidate_name=args.candidate,
@@ -209,10 +285,9 @@ def _do_run(args: argparse.Namespace) -> int:
             end=end,
             outcome_label=args.outcome_label,
             forced_override_reason=args.force_override_reason if not check.allowed else None,
+            params_fingerprint=fingerprint,
         )
-    except ValueError as exc:
-        print(json.dumps({"error": "invalid_record", "reason": str(exc)}, indent=2))
-        return 1
+
     payload = _result_to_dict(result)
     print(json.dumps(payload, indent=2))
     _write_json_out(args.json_out, payload)
@@ -222,17 +297,45 @@ def _do_run(args: argparse.Namespace) -> int:
 def _do_validate_split(args: argparse.Namespace) -> int:
     archive = MarketArchive(args.archive)
     archive.initialize()
+    initialize_ledger(archive)
     settings = _settings_for_archive(args.archive)
+
+    fingerprint = compute_params_fingerprint(args.params_json)
+    mismatch = verify_params_fingerprint(
+        archive, candidate_name=args.candidate, params_fingerprint=fingerprint
+    )
+    if mismatch:
+        print(json.dumps({"error": "params_mismatch", "reason": mismatch}, indent=2))
+        return 1
+
     parameters = _params_from_json(args.params_json)
     dev_start, dev_end = date.fromisoformat(args.dev_start), date.fromisoformat(args.dev_end)
     val_start, val_end = date.fromisoformat(args.val_start), date.fromisoformat(args.val_end)
-    test_start, test_end = date.fromisoformat(args.test_start), date.fromisoformat(args.test_end)
-    if not (dev_start <= dev_end < val_start <= val_end < test_start <= test_end):
+    test_start = date.fromisoformat(args.test_start) if args.test_start else None
+    test_end = date.fromisoformat(args.test_end) if args.test_end else None
+
+    if (test_start is None) != (test_end is None):
         print(
             json.dumps(
                 {
                     "error": "invalid_ranges",
-                    "reason": "development, validation, and test ranges must be "
+                    "reason": "--test-start and --test-end must both be given, or both omitted "
+                    "for a development/validation-only cycle",
+                },
+                indent=2,
+            )
+        )
+        return 1
+
+    chronological = dev_start <= dev_end < val_start <= val_end
+    if test_start is not None:
+        chronological = chronological and val_end < test_start <= test_end
+    if not chronological:
+        print(
+            json.dumps(
+                {
+                    "error": "invalid_ranges",
+                    "reason": "development, validation, and (if given) test ranges must be "
                     "chronological and non-overlapping",
                 },
                 indent=2,
@@ -251,26 +354,52 @@ def _do_validate_split(args: argparse.Namespace) -> int:
             timeframe=args.timeframe,
         )
 
-    test_check = check_range(
-        archive,
-        candidate_name=args.candidate,
-        role=UsageRole.TEST,
-        underlying_key=args.underlying_key,
-        timeframe=args.timeframe,
-        start=test_start,
-        end=test_end,
+    test_check = (
+        check_range(
+            archive,
+            candidate_name=args.candidate,
+            role=UsageRole.TEST,
+            underlying_key=args.underlying_key,
+            timeframe=args.timeframe,
+            start=test_start,
+            end=test_end,
+        )
+        if test_start is not None
+        else None
     )
 
     development = _run(dev_start, dev_end)
     validation = _run(val_start, val_end)
     record_usage(
-        archive, candidate_name=args.candidate, role=UsageRole.DEVELOPMENT,
-        underlying_key=args.underlying_key, timeframe=args.timeframe, start=dev_start, end=dev_end,
+        archive,
+        candidate_name=args.candidate,
+        role=UsageRole.DEVELOPMENT,
+        underlying_key=args.underlying_key,
+        timeframe=args.timeframe,
+        start=dev_start,
+        end=dev_end,
+        params_fingerprint=fingerprint,
     )
     record_usage(
-        archive, candidate_name=args.candidate, role=UsageRole.VALIDATION,
-        underlying_key=args.underlying_key, timeframe=args.timeframe, start=val_start, end=val_end,
+        archive,
+        candidate_name=args.candidate,
+        role=UsageRole.VALIDATION,
+        underlying_key=args.underlying_key,
+        timeframe=args.timeframe,
+        start=val_start,
+        end=val_end,
+        params_fingerprint=fingerprint,
     )
+
+    if test_start is None:
+        payload = {
+            "status": "dev_validation_only",
+            "development": _result_to_dict(development),
+            "validation": _result_to_dict(validation),
+        }
+        print(json.dumps(payload, indent=2))
+        _write_json_out(args.json_out, payload)
+        return 0
 
     if not test_check.allowed and not args.force_override_reason:
         payload = {
@@ -283,22 +412,43 @@ def _do_validate_split(args: argparse.Namespace) -> int:
         _write_json_out(args.json_out, payload)
         return 0
 
+    if not args.force_override_reason and not has_underlying_data(
+        archive, underlying_key=args.underlying_key, timeframe=args.timeframe, start=test_start, end=test_end
+    ):
+        payload = {
+            "status": "test_data_unavailable",
+            "reason": "no archived underlying candles in the test range yet -- not spending a "
+            "test attempt; retry once more data has been ingested",
+            "development": _result_to_dict(development),
+            "validation": _result_to_dict(validation),
+        }
+        print(json.dumps(payload, indent=2))
+        _write_json_out(args.json_out, payload)
+        return 0
+
+    reservation = reserve_test_range(
+        archive,
+        candidate_name=args.candidate,
+        underlying_key=args.underlying_key,
+        timeframe=args.timeframe,
+        start=test_start,
+        end=test_end,
+        forced_override_reason=args.force_override_reason,
+        params_fingerprint=fingerprint,
+    )
+    if reservation is None:
+        payload = {
+            "status": "deferred_no_test",
+            "reason": test_check.reason,
+            "development": _result_to_dict(development),
+            "validation": _result_to_dict(validation),
+        }
+        print(json.dumps(payload, indent=2))
+        _write_json_out(args.json_out, payload)
+        return 0
+
     test = _run(test_start, test_end)
-    try:
-        record_usage(
-            archive,
-            candidate_name=args.candidate,
-            role=UsageRole.TEST,
-            underlying_key=args.underlying_key,
-            timeframe=args.timeframe,
-            start=test_start,
-            end=test_end,
-            outcome_label=args.outcome_label,
-            forced_override_reason=args.force_override_reason if not test_check.allowed else None,
-        )
-    except ValueError as exc:
-        print(json.dumps({"error": "invalid_record", "reason": str(exc)}, indent=2))
-        return 1
+    finalize_test_reservation(archive, reservation, outcome_label=args.outcome_label)
 
     classification = classify_confirmation(
         archive,
@@ -309,7 +459,7 @@ def _do_validate_split(args: argparse.Namespace) -> int:
         end=test_end,
     )
     payload = {
-        "status": "completed",
+        "status": "completed" if test.trades else "completed_zero_trades",
         "classification": classification,
         "development": _result_to_dict(development),
         "validation": _result_to_dict(validation),
@@ -323,10 +473,11 @@ def _do_validate_split(args: argparse.Namespace) -> int:
 def _do_ledger(args: argparse.Namespace) -> int:
     archive = MarketArchive(args.archive)
     archive.initialize()
+    initialize_ledger(archive)
     context = (
         research_context_for_ideation(archive) if args.redact else research_context_for_evaluation(archive)
     )
     if args.export_json:
-        export_ledger_json(archive, args.export_json)
+        export_ledger_json(archive, args.export_json, redact=args.redact)
     print(json.dumps(context, indent=2, sort_keys=True))
     return 0

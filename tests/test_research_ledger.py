@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -11,20 +12,40 @@ from options_bot.research_ledger import (
     UsageRole,
     check_range,
     classify_confirmation,
+    compute_params_fingerprint,
     export_ledger_json,
+    finalize_test_reservation,
+    has_underlying_data,
+    initialize_ledger,
     record_usage,
+    reserve_test_range,
     research_context_for_evaluation,
     research_context_for_ideation,
+    resolve_archive_date_range,
+    verify_params_fingerprint,
 )
+from options_bot.upstox_data import UpstoxCandle
 
 UNDERLYING = "NSE_INDEX|Nifty 50"
 TIMEFRAME = "FIVE_MINUTE"
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def archive(tmp_path: Path) -> MarketArchive:
     result = MarketArchive(tmp_path / "market-data.sqlite3")
     result.initialize()
     return result
+
+
+def _seed_candles(store: MarketArchive, day: date) -> None:
+    start = datetime(day.year, day.month, day.day, 9, 15, tzinfo=IST)
+    candles = [
+        UpstoxCandle("NIFTY", start + timedelta(minutes=5 * i), 100 + i, 102 + i, 99 + i, 101 + i)
+        for i in range(4)
+    ]
+    store.save_upstox_candles(
+        candles, token=UNDERLYING, exchange="NSE_INDEX", timeframe=TIMEFRAME, collected_at=start
+    )
 
 
 def test_development_and_validation_ranges_may_always_be_reused(tmp_path: Path) -> None:
@@ -305,3 +326,184 @@ def test_check_range_rejects_start_after_end(tmp_path: Path) -> None:
     )
 
     assert result.allowed is False
+
+
+def test_initialize_ledger_seeds_a_conservative_row_from_existing_candles(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    _seed_candles(store, date(2026, 8, 3))
+
+    initialize_ledger(store)
+
+    blocked = check_range(
+        store, candidate_name="Anything", role=UsageRole.TEST,
+        underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 8, 3), end=date(2026, 8, 3),
+    )
+    fresh = check_range(
+        store, candidate_name="Anything", role=UsageRole.TEST,
+        underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 8, 4), end=date(2026, 8, 10),
+    )
+
+    assert blocked.allowed is False, "pre-existing candle history must not be certifiable as fresh"
+    assert fresh.allowed is True
+
+
+def test_initialize_ledger_is_idempotent_and_does_not_overwrite_real_history(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    _seed_candles(store, date(2026, 8, 3))
+    record_usage(
+        store, candidate_name="Baseline", role=UsageRole.SCREENING,
+        underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 1, 1), end=date(2026, 7, 31),
+    )
+
+    initialize_ledger(store)
+    initialize_ledger(store)
+
+    rows = research_context_for_evaluation(store)["usage_history"]
+    assert len(rows) == 1, "seeding must be a no-op once real history already exists for the scope"
+    assert rows[0]["candidate_name"] == "Baseline"
+
+
+def test_resolve_and_has_underlying_data(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+
+    assert resolve_archive_date_range(store, UNDERLYING, TIMEFRAME) is None
+    assert has_underlying_data(
+        store, underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 8, 3), end=date(2026, 8, 3),
+    ) is False
+
+    _seed_candles(store, date(2026, 8, 3))
+
+    assert resolve_archive_date_range(store, UNDERLYING, TIMEFRAME) == (date(2026, 8, 3), date(2026, 8, 3))
+    assert has_underlying_data(
+        store, underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 8, 1), end=date(2026, 8, 5),
+    ) is True
+    assert has_underlying_data(
+        store, underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 9, 1), end=date(2026, 9, 5),
+    ) is False
+
+
+def test_verify_params_fingerprint_catches_a_renamed_parameter_set(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    first_fingerprint = compute_params_fingerprint('{"name": "X", "bullish_rsi_min": 60}')
+    record_usage(
+        store, candidate_name="X", role=UsageRole.DEVELOPMENT,
+        underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 1, 1), end=date(2026, 1, 31),
+        params_fingerprint=first_fingerprint,
+    )
+
+    same_params = verify_params_fingerprint(
+        store, candidate_name="X", params_fingerprint=first_fingerprint
+    )
+    different_params = verify_params_fingerprint(
+        store, candidate_name="X",
+        params_fingerprint=compute_params_fingerprint('{"name": "X", "bullish_rsi_min": 65}'),
+    )
+    unseen_candidate = verify_params_fingerprint(
+        store, candidate_name="Never seen before", params_fingerprint="anything"
+    )
+
+    assert same_params is None
+    assert different_params is not None and "fingerprint mismatch" in different_params
+    assert unseen_candidate is None
+
+
+def test_compute_params_fingerprint_is_stable_regardless_of_key_order(tmp_path: Path) -> None:
+    a = compute_params_fingerprint('{"name": "X", "bullish_rsi_min": 60}')
+    b = compute_params_fingerprint('{"bullish_rsi_min": 60, "name": "X"}')
+    c = compute_params_fingerprint('{"name": "X", "bullish_rsi_min": 61}')
+
+    assert a == b
+    assert a != c
+
+
+def test_reserve_test_range_inserts_immediately_so_a_second_reservation_is_blocked(
+    tmp_path: Path,
+) -> None:
+    store = archive(tmp_path)
+
+    first = reserve_test_range(
+        store, candidate_name="First", underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 1), end=date(2026, 7, 31),
+    )
+    second = reserve_test_range(
+        store, candidate_name="Second", underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 15), end=date(2026, 7, 15),
+    )
+
+    assert first is not None
+    assert second is None, (
+        "a reservation must be visible to check_range immediately, before any finalize call -- "
+        "this is what protects against a crash or a concurrent second reservation"
+    )
+
+
+def test_reserve_and_finalize_round_trip_is_what_classify_confirmation_certifies(
+    tmp_path: Path,
+) -> None:
+    store = archive(tmp_path)
+
+    reservation = reserve_test_range(
+        store, candidate_name="Morning entries", underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 1), end=date(2026, 7, 31),
+    )
+    assert reservation is not None
+
+    finalize_test_reservation(store, reservation, outcome_label="rejected", notes="12 trades, net -340")
+
+    classification = classify_confirmation(
+        store, candidate_name="Morning entries",
+        underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 1), end=date(2026, 7, 31),
+    )
+    assert classification == "eligible_confirmed"
+
+
+def test_reserve_test_range_refuses_a_blocked_range_without_forced_override(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    record_usage(
+        store, candidate_name="Prior", role=UsageRole.SCREENING,
+        underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 1, 1), end=date(2026, 7, 31),
+    )
+
+    blocked = reserve_test_range(
+        store, candidate_name="X", underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 1), end=date(2026, 7, 31),
+    )
+    forced = reserve_test_range(
+        store, candidate_name="X", underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 1), end=date(2026, 7, 31),
+        forced_override_reason="operator insisted",
+    )
+
+    assert blocked is None
+    assert forced is not None
+    assert forced.forced_override_reason == "operator insisted"
+
+
+def test_export_ledger_json_redacted_omits_notes_and_numeric_leakage(tmp_path: Path) -> None:
+    store = archive(tmp_path)
+    record_usage(
+        store, candidate_name="Morning entries", role=UsageRole.TEST,
+        underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 1), end=date(2026, 7, 31),
+        outcome_label="confirmed", notes="net_pnl=1064.90 drawdown=5994.10 trades=31",
+    )
+
+    redacted_target = export_ledger_json(
+        store, tmp_path / "research" / "redacted.json", redact=True
+    )
+    full_target = export_ledger_json(store, tmp_path / "research" / "full.json", redact=False)
+
+    redacted_contents = redacted_target.read_text(encoding="utf-8")
+    full_contents = full_target.read_text(encoding="utf-8")
+    assert "1064.90" not in redacted_contents
+    assert "notes" not in redacted_contents
+    assert "1064.90" in full_contents

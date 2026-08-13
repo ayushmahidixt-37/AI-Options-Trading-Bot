@@ -518,6 +518,54 @@ def test_upstox_backtest_reports_insufficient_data_and_csv_is_404_until_run(tmp_
     assert client.get("/upstox/trades.csv", auth=auth()).status_code == 404
 
 
+def test_upstox_backtest_records_range_usage_for_the_ledger(tmp_path: Path) -> None:
+    from options_bot.upstox_data import UpstoxCandle
+    from options_bot.upstox_ingest import NIFTY_UNDERLYING_KEY
+
+    cfg = Settings.from_env(
+        {
+            "DATA_DIR": str(tmp_path),
+            "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+            "UPSTOX_BACKTEST_ENABLED": "true",
+        }
+    )
+    connections = ConnectionManager(cfg)
+    start = datetime(2026, 8, 3, 9, 15, tzinfo=IST)
+    candles = [
+        UpstoxCandle("NIFTY", start + timedelta(minutes=5 * i), 100 + i, 102 + i, 99 + i, 101 + i)
+        for i in range(4)
+    ]
+    connections.archive.save_upstox_candles(
+        candles, token=NIFTY_UNDERLYING_KEY, exchange="NSE_INDEX",
+        timeframe="FIVE_MINUTE", collected_at=start,
+    )
+    client = TestClient(create_web_app(cfg, "secret", connections))
+
+    client.post("/actions/upstox-backtest", auth=auth())
+
+    with connections.archive.connect() as con:
+        rows = con.execute(
+            "SELECT candidate_name, role, range_start, range_end FROM range_usage "
+            "WHERE candidate_name='dashboard-backtest'"
+        ).fetchall()
+
+    assert len(rows) == 1
+    assert rows[0][1] == "screening"
+    assert rows[0][2] == "2026-08-03"
+    assert rows[0][3] == "2026-08-03"
+
+    # A later CLI test attempt over the exact same date must now be blocked,
+    # proving the dashboard-touched range is visible to the ledger.
+    from options_bot.research_ledger import UsageRole, check_range
+
+    blocked = check_range(
+        connections.archive, candidate_name="Any candidate", role=UsageRole.TEST,
+        underlying_key=NIFTY_UNDERLYING_KEY, timeframe="FIVE_MINUTE",
+        start=date(2026, 8, 3), end=date(2026, 8, 3),
+    )
+    assert blocked.allowed is False
+
+
 def test_upstox_analysis_summary_is_404_until_backtest_then_returns_plain_text(
     tmp_path: Path, monkeypatch
 ) -> None:

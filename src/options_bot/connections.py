@@ -22,6 +22,7 @@ from .domain import Instrument, Quote
 from .indicators import atr, ema, rsi
 from .instruments import normalize_instruments
 from .market_archive import MarketArchive
+from .research_ledger import initialize_ledger
 from .notifications import TelegramNotifier
 from .strategy import MomentumStrategy
 
@@ -240,6 +241,7 @@ class ConnectionManager:
         self.archive = market_archive or MarketArchive(settings.data_dir / "market-data.sqlite3")
         self._request_pause = request_pause
         self.archive.initialize()
+        initialize_ledger(self.archive)
         self._smart_api: object | None = None
         self._lock = threading.RLock()
         self._snapshot = ConnectionSnapshot()

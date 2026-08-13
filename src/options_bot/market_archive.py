@@ -55,6 +55,28 @@ class MarketArchive:
         finally:
             connection.close()
 
+    @contextmanager
+    def connect_exclusive(self) -> Iterator[sqlite3.Connection]:
+        """Like ``connect``, but serializes with any other writer via
+        ``BEGIN IMMEDIATE`` -- for operations (reserving a scarce test-range
+        row) where a plain read-then-write is not safe against a second
+        process doing the same read before the first process's write lands.
+        SQLite's file lock makes the second caller block until the first
+        commits, so it observes the first caller's freshly-written row
+        instead of the same stale state.
+        """
+        connection = sqlite3.connect(self.path, timeout=10, isolation_level=None)
+        connection.row_factory = sqlite3.Row
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield connection
+            connection.execute("COMMIT")
+        except Exception:
+            connection.execute("ROLLBACK")
+            raise
+        finally:
+            connection.close()
+
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as con:
@@ -125,7 +147,8 @@ class MarketArchive:
                     outcome_label TEXT,
                     forced_override_reason TEXT,
                     git_commit TEXT,
-                    notes TEXT NOT NULL DEFAULT ''
+                    notes TEXT NOT NULL DEFAULT '',
+                    params_fingerprint TEXT
                 );
                 CREATE INDEX IF NOT EXISTS candle_time_idx ON market_candles(started_at);
                 CREATE INDEX IF NOT EXISTS instrument_expiry_idx
@@ -135,6 +158,7 @@ class MarketArchive:
                 """
             )
             self._ensure_column(con, "market_candles", "open_interest", "REAL")
+            self._ensure_column(con, "range_usage", "params_fingerprint", "TEXT")
 
     @staticmethod
     def _ensure_column(con: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:

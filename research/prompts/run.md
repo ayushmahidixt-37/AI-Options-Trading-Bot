@@ -12,12 +12,18 @@ Execute the plan exactly as given, no discretion:
 - If `status == "ready_for_dev_validation_only"`: run
   `options-bot backtest validate-split --archive <path> --candidate <candidate_name>
   --params-json '<parameters>' --dev-start ... --dev-end ... --val-start ...
-  --val-end ... --test-start <development_end + 1 day, or any placeholder
-  the CLI will correctly report as blocked> --test-end <same>`. The CLI
-  will report `status: "deferred_no_test"` and still record development
-  and validation -- this is expected, not an error.
+  --val-end ...` -- **omit `--test-start`/`--test-end` entirely**. Do not
+  invent a placeholder test range: on a fresh or sparsely-populated ledger
+  a placeholder date can be genuinely fresh and the CLI will then spend a
+  real test attempt by mistake. Omitting both flags is the CLI's real
+  development/validation-only path -- it runs no test leg at all and
+  reports `status: "dev_validation_only"`.
 - If `status == "ready_for_full_split"`: run the same command with the
-  real `--test-start`/`--test-end` from the plan.
+  real `--test-start`/`--test-end` from the plan. The CLI may still come
+  back with `status: "deferred_no_test"` (ledger says the range isn't
+  eligible after all) or `status: "test_data_unavailable"` (the range
+  hasn't been ingested yet) -- both are expected outcomes, not errors,
+  and neither spends the candidate's test attempt.
 
 Never pass `--force-override-reason` unless a human has explicitly told
 you to for this specific run -- it exists for rare, deliberate exceptions,

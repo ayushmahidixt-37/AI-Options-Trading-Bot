@@ -36,6 +36,7 @@ from .readiness import (
     export_readiness_csv,
     save_manual_review,
 )
+from .research_ledger import UsageRole, record_usage, resolve_archive_date_range
 
 
 def _parse_optional_float(value: str) -> float | None:
@@ -75,6 +76,40 @@ def _require_upstox_client(settings: Settings) -> UpstoxClient:
             "Upstox credentials are incomplete. Set UPSTOX_ACCESS_TOKEN in credentials.env."
         )
     return UpstoxClient(access_token, timeout_seconds=settings.upstox_request_timeout_seconds)
+
+
+def _record_dashboard_usage(
+    connections: ConnectionManager,
+    candidate_name: str,
+    start: date | None,
+    end: date | None,
+) -> None:
+    """Best-effort ledger visibility for a manual dashboard backtest.
+
+    Without this, a range reviewed here is invisible to
+    `research_ledger.check_range` -- a later CLI test over the exact same
+    dates would be wrongly certified as genuinely fresh. Always recorded
+    as `screening` (never a candidate's scarce test attempt); `start`/
+    `end` of `None` (dashboard's "whole archive" default) resolve to the
+    archive's actual existing candle span.
+    """
+    resolved_start, resolved_end = start, end
+    if resolved_start is None or resolved_end is None:
+        span = resolve_archive_date_range(connections.archive, NIFTY_UNDERLYING_KEY, "FIVE_MINUTE")
+        if span is None:
+            return
+        resolved_start = resolved_start or span[0]
+        resolved_end = resolved_end or span[1]
+    record_usage(
+        connections.archive,
+        candidate_name=candidate_name,
+        role=UsageRole.SCREENING,
+        underlying_key=NIFTY_UNDERLYING_KEY,
+        timeframe="FIVE_MINUTE",
+        start=resolved_start,
+        end=resolved_end,
+        notes="Recorded from the dashboard, not the research CLI.",
+    )
 
 
 def create_web_app(
@@ -475,6 +510,7 @@ def create_web_app(
             latest_upstox_analysis = run_deep_analysis(
                 connections.archive, start=start, end=end, settings=settings
             )
+            _record_dashboard_usage(connections, "dashboard-backtest", start, end)
             overall = latest_upstox_analysis.overall
             message = "Upstox backtest completed" if overall.trades else overall.reason
             ok = overall.trades > 0
@@ -571,6 +607,7 @@ def create_web_app(
             latest_upstox_custom_analysis = run_deep_analysis(
                 connections.archive, start=start, end=end, settings=settings, variants=(parameters,)
             )
+            _record_dashboard_usage(connections, "dashboard-custom-backtest", start, end)
             overall = latest_upstox_custom_analysis.overall
             message = "Custom Upstox backtest completed" if overall.trades else overall.reason
             ok = overall.trades > 0
@@ -619,17 +656,25 @@ def create_web_app(
                 raise UpstoxDataError(
                     "Upstox backtesting is disabled. Set UPSTOX_BACKTEST_ENABLED=true to use this tab."
                 )
+            dev_start_parsed = date.fromisoformat(development_start)
+            test_end_parsed = date.fromisoformat(test_end)
             latest_upstox_validation = run_strategy_validation(
                 connections.archive,
                 settings,
-                development_start=date.fromisoformat(development_start),
+                development_start=dev_start_parsed,
                 development_end=date.fromisoformat(development_end),
                 validation_start=date.fromisoformat(validation_start),
                 validation_end=date.fromisoformat(validation_end),
                 test_start=date.fromisoformat(test_start),
-                test_end=date.fromisoformat(test_end),
+                test_end=test_end_parsed,
                 runner=run_upstox_backtest,
             )
+            # Recorded as one conservative span (development start through test
+            # end), not broken into per-role rows -- the dashboard has no stable
+            # candidate identity across re-runs, so this only needs to make the
+            # whole span visible to future check_range calls, never to certify
+            # a "confirmed" test attempt (see AGENTS.md rule 7).
+            _record_dashboard_usage(connections, "dashboard-validation", dev_start_parsed, test_end_parsed)
             message = f"Upstox strategy validation completed · {latest_upstox_validation.status}"
             ok = True
         except (UpstoxDataError, ValueError) as exc:
