@@ -113,9 +113,25 @@ class MarketArchive:
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS range_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recorded_at TEXT NOT NULL,
+                    candidate_name TEXT NOT NULL,
+                    role TEXT NOT NULL CHECK(role IN ('screening','development','validation','test')),
+                    underlying_key TEXT NOT NULL,
+                    timeframe TEXT NOT NULL,
+                    range_start TEXT NOT NULL,
+                    range_end TEXT NOT NULL,
+                    outcome_label TEXT,
+                    forced_override_reason TEXT,
+                    git_commit TEXT,
+                    notes TEXT NOT NULL DEFAULT ''
+                );
                 CREATE INDEX IF NOT EXISTS candle_time_idx ON market_candles(started_at);
                 CREATE INDEX IF NOT EXISTS instrument_expiry_idx
                     ON instruments(underlying, expiry, strike);
+                CREATE INDEX IF NOT EXISTS range_usage_scope_idx
+                    ON range_usage(underlying_key, timeframe);
                 """
             )
             self._ensure_column(con, "market_candles", "open_interest", "REAL")
