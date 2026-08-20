@@ -25,3 +25,8 @@
    (`options-bot backtest check-range/run/validate-split/ledger`) is the
    only sanctioned way to run a backtest outside the dashboard, so the
    ledger check and record happen atomically around every run.
+8. Whenever new Upstox candle data is ingested (CLI, dashboard, or
+   `pull_range`), update the "Historical Upstox backtest data — current
+   coverage" date range in `PROJECT_STATUS.md` in the same commit. That
+   line is the one place a new session should trust for "how much
+   history do we actually have" without querying the archive directly.
