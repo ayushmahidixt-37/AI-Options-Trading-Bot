@@ -326,13 +326,14 @@ class ConnectionManager:
             )
         return reason
 
-    def _refresh_archive_snapshot(self) -> None:
+    def _refresh_archive_snapshot(self, now: datetime | None = None) -> None:
         stats = self.archive.stats()
         with self._lock:
             spot = self._snapshot.nifty_price
-        selection = self.archive.nearest_expiry_summary(
-            datetime.now(self._settings.timezone).date(), spot
-        )
+        today = (now or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        ).date()
+        selection = self.archive.nearest_expiry_summary(today, spot)
         with self._lock:
             self._snapshot = replace(
                 self._snapshot,
@@ -373,7 +374,7 @@ class ConnectionManager:
             self.archive.record_run(now, "success", 0, saved, "NIFTY instruments archived")
             self._record_archive_write(now)
             self._last_instrument_refresh_date = now.date()
-            self._refresh_archive_snapshot()
+            self._refresh_archive_snapshot(now)
         except Exception as exc:
             detail = _safe_detail(f"{type(exc).__name__}: {exc}", ())
             self.archive.record_run(now, "failed", 0, 0, detail)
@@ -454,7 +455,7 @@ class ConnectionManager:
                 option_contracts_tracked=len(contracts),
                 option_archive_error=detail if failures else None,
             )
-        self._refresh_archive_snapshot()
+        self._refresh_archive_snapshot(now)
         return self.snapshot()
 
     def create_paper_proposal(
@@ -612,7 +613,7 @@ class ConnectionManager:
             if saved:
                 self._record_archive_write(now)
             self._last_catchup_date = now.date()
-            self._refresh_archive_snapshot()
+            self._refresh_archive_snapshot(now)
             with self._lock:
                 self._snapshot = replace(
                     self._snapshot, catchup_status=f"complete · {saved} new candles"
@@ -947,7 +948,7 @@ class ConnectionManager:
             self.archive.save_observation(now, {**snapshot, "spot": spot})
             self.archive.record_run(now, "success", saved, 0, "NIFTY candles archived")
             self._record_archive_write(now)
-            self._refresh_archive_snapshot()
+            self._refresh_archive_snapshot(now)
         except Exception as exc:
             detail = _safe_detail(f"{type(exc).__name__}: {exc}", secrets)
             message = f"NIFTY intelligence refresh failed · {detail}"
