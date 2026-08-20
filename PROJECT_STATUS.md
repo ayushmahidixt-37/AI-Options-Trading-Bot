@@ -401,13 +401,16 @@ already have a copy of that file, ask the user for it (they've
 previously transferred it via a temporary GitHub Release asset) rather
 than assuming the archive is empty or re-pulling from scratch.
 
-Whoever ingests new data past 2026-07-31 (`options-bot backtest ...` /
-the dashboard's Upstox ingest tab / `pull_range`) must update the date
-above in the same commit — this is the one line a new session should
-trust to know "how much history do we actually have" without querying
-the database directly. To verify it yourself against a real archive:
-`options-bot backtest ledger --archive <path to market-data.sqlite3>`
-or query `SELECT MIN(started_at), MAX(started_at) FROM market_candles
+Whoever ingests new data past 2026-07-31 (the dashboard's Upstox ingest
+tab, or `pull_range` directly) must update the date above in the same
+commit — this is the one line a new session should trust to know "how
+much history do we actually have" without querying the database
+directly. `options-bot backtest ...` never ingests anything; it only
+reads candles already in the archive. To verify the actual candle
+coverage yourself (not `options-bot backtest ledger`, which reports
+research-usage history — which candidate/role touched what range — not
+raw candle coverage, and doesn't update just because new candles
+arrive): query `SELECT MIN(started_at), MAX(started_at) FROM market_candles
 WHERE source='upstox'`.
 
 ## How to resume on the tablet
