@@ -386,6 +386,33 @@ period used for final testing.
 SQLite files are the master records. CSV downloads are exports, not databases.
 Do not delete `.termux-data` during updates.
 
+### Historical Upstox backtest data — current coverage
+
+**2026-01-01 to 2026-07-31** — NIFTY underlying + option-chain 5-minute
+candles, Upstox source only (`source='upstox'` rows in `market_candles`,
+never mixed with Angel data). See `BACKTEST_FINDINGS.md`'s
+2026-08-12 entry for exactly how this was pulled and what's been run
+against it.
+
+This range lives only inside `market-data.sqlite3` (the row above) —
+**it is never committed to git**, so a fresh `git clone` of this repo
+does NOT include it. If you're starting a new session/device and don't
+already have a copy of that file, ask the user for it (they've
+previously transferred it via a temporary GitHub Release asset) rather
+than assuming the archive is empty or re-pulling from scratch.
+
+Whoever ingests new data past 2026-07-31 (the dashboard's Upstox ingest
+tab, or `pull_range` directly) must update the date above in the same
+commit — this is the one line a new session should trust to know "how
+much history do we actually have" without querying the database
+directly. `options-bot backtest ...` never ingests anything; it only
+reads candles already in the archive. To verify the actual candle
+coverage yourself (not `options-bot backtest ledger`, which reports
+research-usage history — which candidate/role touched what range — not
+raw candle coverage, and doesn't update just because new candles
+arrive): query `SELECT MIN(started_at), MAX(started_at) FROM market_candles
+WHERE source='upstox'`.
+
 ## How to resume on the tablet
 
 ```bash
