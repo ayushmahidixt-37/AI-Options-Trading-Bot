@@ -1,6 +1,11 @@
 # Repository agent instructions
 
 1. Read `PROJECT_STATUS.md` before planning or modifying this repository.
+   For backtest/strategy research work specifically, read
+   `research/INDEX.md` first — a short current-state pointer file that
+   avoids re-reading the entire (long, by-design chronological)
+   `BACKTEST_FINDINGS.md` just to find out what the current best
+   candidate is.
 2. Treat its safety boundary as mandatory unless the user explicitly requests a
    separately reviewed change and higher-priority instructions permit it.
 3. Update `PROJECT_STATUS.md` in the same commit whenever completed features,
