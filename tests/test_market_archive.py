@@ -187,6 +187,37 @@ def test_upstox_candles_are_duplicate_safe_and_carry_open_interest(tmp_path: Pat
     assert row == ("upstox", 5000.0)
 
 
+def test_upstox_candles_default_to_not_derived_and_can_be_tagged(tmp_path: Path) -> None:
+    """A resampled/materialized bar must never be indistinguishable from a
+    real, directly-fetched one -- see BACKTEST_FINDINGS.md's 2026-08-21
+    data-integrity entry, where exactly that silently broke reproducibility."""
+    store = archive(tmp_path)
+    started = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+
+    store.save_upstox_candles(
+        [UpstoxCandle("NIFTY24APR25000CE", started, 100, 103, 99, 102)],
+        token="NSE_FO|real|24-04-2025", exchange="NFO",
+        timeframe="FIVE_MINUTE", collected_at=started,
+    )
+    store.save_upstox_candles(
+        [UpstoxCandle("NIFTY24APR25000CE", started, 100, 103, 99, 102)],
+        token="NSE_FO|derived|24-04-2025", exchange="NFO",
+        timeframe="FIVE_MINUTE", collected_at=started,
+        derived_from_timeframe="ONE_MINUTE",
+    )
+
+    with sqlite3.connect(store.path) as con:
+        rows = dict(
+            con.execute(
+                "SELECT instrument_token, derived_from_timeframe FROM market_candles "
+                "WHERE instrument_token IN (?, ?)",
+                ("NSE_FO|real|24-04-2025", "NSE_FO|derived|24-04-2025"),
+            ).fetchall()
+        )
+    assert rows["NSE_FO|real|24-04-2025"] is None
+    assert rows["NSE_FO|derived|24-04-2025"] == "ONE_MINUTE"
+
+
 def test_upstox_and_angel_candles_coexist_without_collision(tmp_path: Path) -> None:
     store = archive(tmp_path)
     started = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
@@ -226,9 +257,30 @@ def test_has_upstox_candles_reports_presence_by_token_and_range(tmp_path: Path) 
         collected_at=started,
     )
 
-    assert store.has_upstox_candles("NSE_INDEX|Nifty 50", date(2026, 7, 1), date(2026, 7, 7))
-    assert not store.has_upstox_candles("NSE_INDEX|Nifty 50", date(2026, 6, 1), date(2026, 6, 30))
-    assert not store.has_upstox_candles("NSE_FO|999|31-12-2026", date(2026, 7, 1), date(2026, 7, 7))
+    assert store.has_upstox_candles("NSE_INDEX|Nifty 50", date(2026, 7, 1), date(2026, 7, 7), "FIVE_MINUTE")
+    assert not store.has_upstox_candles("NSE_INDEX|Nifty 50", date(2026, 6, 1), date(2026, 6, 30), "FIVE_MINUTE")
+    assert not store.has_upstox_candles("NSE_FO|999|31-12-2026", date(2026, 7, 1), date(2026, 7, 7), "FIVE_MINUTE")
+
+
+def test_has_upstox_candles_does_not_cross_timeframes(tmp_path: Path) -> None:
+    """Regression test: existing FIVE_MINUTE data must never make a
+    ONE_MINUTE presence check for the same token/range return True -- this
+    exact bug caused a real ingestion gap (see BACKTEST_FINDINGS.md's
+    2026-08-21 multi-timeframe entry): a one-minute pull silently skipped
+    every date range that already had five-minute data for the same token.
+    """
+    store = archive(tmp_path)
+    started = datetime(2026, 7, 3, 9, 15, tzinfo=IST)
+    store.save_upstox_candles(
+        [UpstoxCandle("Nifty 50", started, 100, 103, 99, 102)],
+        token="NSE_INDEX|Nifty 50",
+        exchange="NSE_INDEX",
+        timeframe="FIVE_MINUTE",
+        collected_at=started,
+    )
+
+    assert store.has_upstox_candles("NSE_INDEX|Nifty 50", date(2026, 7, 1), date(2026, 7, 7), "FIVE_MINUTE")
+    assert not store.has_upstox_candles("NSE_INDEX|Nifty 50", date(2026, 7, 1), date(2026, 7, 7), "ONE_MINUTE")
 
 
 def test_upstox_coverage_ranges_groups_contiguous_days(tmp_path: Path) -> None:

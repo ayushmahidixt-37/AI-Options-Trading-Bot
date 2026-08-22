@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from options_bot.cli import parser
 from options_bot.domain import Instrument
 from options_bot.market_archive import MarketArchive
+from options_bot.ml_model import SignalQualityModel, save as save_model
 from options_bot.research_ledger import UsageRole, record_usage
 from options_bot.upstox_data import UpstoxCandle
 from options_bot.upstox_ingest import NIFTY_UNDERLYING_KEY
@@ -384,6 +385,91 @@ def test_outcome_label_confirmed_is_not_a_valid_cli_choice() -> None:
              "--role", "test", "--start", "2026-01-01", "--end", "2026-01-31",
              "--params-json", "{}", "--outcome-label", "confirmed"]
         )
+
+
+def _seed_model(tmp_path: Path) -> Path:
+    model = SignalQualityModel(
+        feature_names=(), means=(), stds=(), weights=(), bias=10.0, threshold=0.5, metadata={},
+    )
+    return save_model(model, tmp_path / "model.json")
+
+
+def test_ml_validate_split_without_test_args_is_dev_validation_only(tmp_path: Path, capsys) -> None:
+    archive_path = _seed_archive(tmp_path)
+    model_path = _seed_model(tmp_path)
+
+    exit_code, payload = _capture_dispatch(
+        capsys,
+        ["backtest", "ml-validate-split", "--archive", str(archive_path), "--candidate", "MlDevOnly",
+         "--model-path", str(model_path),
+         "--base-params-json", json.dumps({"name": "MlDevOnly", "stop_risk_fraction": 1.6}),
+         "--dev-start", "2026-01-01", "--dev-end", "2026-03-31",
+         "--val-start", "2026-04-01", "--val-end", "2026-05-31"],
+    )
+
+    assert exit_code == 0
+    assert payload["status"] == "dev_validation_only"
+    assert "test" not in payload
+
+    archive = MarketArchive(archive_path)
+    with archive.connect() as con:
+        roles = {
+            row[0]
+            for row in con.execute(
+                "SELECT role FROM range_usage WHERE candidate_name='MlDevOnly'"
+            ).fetchall()
+        }
+    assert roles == {"development", "validation"}
+
+
+def test_ml_validate_split_defers_when_test_range_is_blocked(tmp_path: Path, capsys) -> None:
+    archive_path = _seed_archive(tmp_path)
+    model_path = _seed_model(tmp_path)
+    archive = MarketArchive(archive_path)
+    record_usage(
+        archive, candidate_name="Prior", role=UsageRole.SCREENING,
+        underlying_key=NIFTY_UNDERLYING_KEY, timeframe="FIVE_MINUTE",
+        start=date(2026, 1, 1), end=date(2026, 7, 31),
+    )
+
+    exit_code, payload = _capture_dispatch(
+        capsys,
+        ["backtest", "ml-validate-split", "--archive", str(archive_path), "--candidate", "MlDeferred",
+         "--model-path", str(model_path),
+         "--base-params-json", json.dumps({"name": "MlDeferred", "stop_risk_fraction": 1.6}),
+         "--dev-start", "2026-01-01", "--dev-end", "2026-03-31",
+         "--val-start", "2026-04-01", "--val-end", "2026-05-31",
+         "--test-start", "2026-06-01", "--test-end", "2026-07-31"],
+    )
+
+    assert exit_code == 0
+    assert payload["status"] == "deferred_no_test"
+    assert "development" in payload and "validation" in payload
+    assert "test" not in payload
+
+
+def test_ml_validate_split_rejects_base_params_with_filter_fields(tmp_path: Path, capsys) -> None:
+    archive_path = _seed_archive(tmp_path)
+    model_path = _seed_model(tmp_path)
+
+    exit_code, payload = _capture_dispatch(
+        capsys,
+        ["backtest", "ml-validate-split", "--archive", str(archive_path), "--candidate", "MlBadParams",
+         "--model-path", str(model_path),
+         "--base-params-json", json.dumps({"name": "MlBadParams", "bullish_rsi_min": 55}),
+         "--dev-start", "2026-01-01", "--dev-end", "2026-03-31",
+         "--val-start", "2026-04-01", "--val-end", "2026-05-31"],
+    )
+
+    assert exit_code == 1
+    assert payload["error"] == "invalid_base_params"
+
+    archive = MarketArchive(archive_path)
+    with archive.connect() as con:
+        rows = con.execute(
+            "SELECT * FROM range_usage WHERE candidate_name='MlBadParams'"
+        ).fetchall()
+    assert rows == [], "an invalid base-params request must not touch the ledger at all"
 
 
 def test_settings_for_archive_honors_environment_overrides(tmp_path: Path, monkeypatch) -> None:

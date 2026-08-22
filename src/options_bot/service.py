@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import json
 import signal
 import time
@@ -31,6 +30,8 @@ class PaperService:
         return self.application.settings.data_dir / "options-bot.lock"
 
     def acquire_lock(self) -> None:
+        import fcntl
+
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         handle = self.lock_path.open("w", encoding="utf-8")
         try:
@@ -44,6 +45,8 @@ class PaperService:
 
     def release_lock(self) -> None:
         if self._lock_handle is not None:
+            import fcntl
+
             fcntl.flock(self._lock_handle.fileno(), fcntl.LOCK_UN)
             self._lock_handle.close()
             self._lock_handle = None
