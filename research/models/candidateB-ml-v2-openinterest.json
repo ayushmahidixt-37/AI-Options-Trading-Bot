@@ -1,0 +1,98 @@
+{
+  "bias": -0.38435700631915226,
+  "feature_names": [
+    "rsi",
+    "atr_normalized",
+    "ema_gap_normalized",
+    "confidence",
+    "direction_is_bullish",
+    "minutes_since_open",
+    "day_of_week",
+    "is_macro_event_window",
+    "days_to_expiry",
+    "open_interest_known",
+    "open_interest_normalized"
+  ],
+  "means": [
+    49.975855933295776,
+    0.0009986851948123952,
+    0.00027467379203898325,
+    0.5537496291061347,
+    0.4989130434782609,
+    168.9891304347826,
+    1.8945652173913043,
+    0.09130434782608696,
+    2.5880434782608694,
+    0.7739130434782608,
+    0.7585604360112482
+  ],
+  "metadata": {
+    "base_params_json": "{\"stop_risk_fraction\":1.6,\"target_return\":0.30}",
+    "base_strategy": "TrendConfirmedMomentumStrategy(fast=5,slow=10,macro=60,rsi=21)",
+    "candidate_name": "candidateB-ml-v2-openinterest",
+    "dev_range": [
+      "2024-10-03",
+      "2026-03-31"
+    ],
+    "engine": "upstox_ml_backtest_v2",
+    "feature_weights": {
+      "atr_normalized": -0.027658264681831246,
+      "confidence": 0.13918255478921954,
+      "day_of_week": -0.014631763130866733,
+      "days_to_expiry": 0.05091897707374393,
+      "direction_is_bullish": 0.025629693406568343,
+      "ema_gap_normalized": 0.017789224962224463,
+      "is_macro_event_window": 0.14857753302193102,
+      "minutes_since_open": 0.20162990658093177,
+      "open_interest_known": -0.10936618523456311,
+      "open_interest_normalized": 0.06815884973189165,
+      "rsi": -0.04438829306142315
+    },
+    "hyperparameters": {
+      "epochs": 3000,
+      "l2": 0.05,
+      "learning_rate": 0.1
+    },
+    "include_derived": true,
+    "known_open_interest_count": 712,
+    "training_row_count": 920,
+    "val_metrics_at_chosen_threshold": {
+      "max_drawdown": 3124.050000000003,
+      "net_pnl": 56657.6,
+      "profit_factor": 2.90282614901513,
+      "trades": 90,
+      "win_rate": 0.43333333333333335
+    },
+    "val_range": [
+      "2026-04-01",
+      "2026-05-31"
+    ]
+  },
+  "stds": [
+    6.33684087942399,
+    0.00039542544177419305,
+    0.0002681987313502967,
+    0.03356472698626574,
+    0.4999988185241239,
+    120.07248667269948,
+    1.4037112401582785,
+    0.2880414273922067,
+    2.151558706536928,
+    0.41829612072367633,
+    0.42270885906627276
+  ],
+  "threshold": 0.31,
+  "weights": [
+    -0.04438829306142315,
+    -0.027658264681831246,
+    0.017789224962224463,
+    0.13918255478921954,
+    0.025629693406568343,
+    0.20162990658093177,
+    -0.014631763130866733,
+    0.14857753302193102,
+    0.05091897707374393,
+    -0.10936618523456311,
+    0.06815884973189165
+  ]
+}

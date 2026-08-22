@@ -1,17 +1,28 @@
-"""Offline replay of Upstox-sourced candles, with no strategy_observations dependency.
+"""Offline replay of Upstox-sourced candles, filtered by a trained ML model.
 
-This module is deliberately separate from ``backtest.py``'s in-production,
-Angel-observation-based replay so that path is never touched by this
-read-only, backtesting-only feature. It shares the same trade construction
-discipline (chronological, no look-ahead, conservative fills) and the same
-result aggregation (``build_backtest_result``).
+Deliberately separate from ``upstox_backtest.py`` -- mirroring that module's
+own precedent relative to ``backtest.py`` -- so the already-tested engine is
+never touched. It is *not* safe to run ``run_upstox_backtest`` unfiltered and
+then discard ML-rejected trades afterward: ``run_upstox_backtest`` computes
+each trade's signal-reversal exit boundary from the *next surviving
+observation*, so a rejected signal sitting between two accepted ones would
+otherwise still act as a premature exit trigger for the trade before it,
+giving a kept trade the wrong hold duration/exit price/exit reason. This
+module applies the ML decision to the observation list *before* trade
+construction runs, at the same stage ``_observation_allowed`` already does,
+so that trap cannot occur.
+
+v1 models are trained on ``ml_features.FEATURE_NAMES`` (precontract-only). A
+model whose ``feature_names`` includes any ``POSTCONTRACT_FEATURE_NAMES`` is
+rejected here with a clear error -- that would require moving contract
+selection ahead of the filter check and is explicitly deferred to a v2 model.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
+from . import ml_features
 from .backtest import (
     BacktestParameters,
     BacktestResult,
@@ -19,129 +30,18 @@ from .backtest import (
     _observation_allowed,
     build_backtest_result,
 )
-from .candles import Candle
 from .config import Settings
-from .indicators import atr_series, ema
-from .indicators import rsi as compute_rsi
+from .ml_model import SignalQualityModel
 from .market_archive import MarketArchive
 from .strategy import MomentumStrategy
+from .upstox_backtest import generate_signals_from_candles
 from .upstox_ingest import NIFTY_UNDERLYING_KEY
+from .candles import Candle
 
 
-@dataclass(frozen=True)
-class SyntheticObservation:
-    """One in-memory, walk-forward signal derived from raw Upstox candles."""
-
-    observed_at: datetime
-    spot: float
-    signal: str
-    rsi: float | None
-    atr: float
-    confidence: float
-
-
-def generate_signals_from_candles(
-    candles: list[Candle], strategy: MomentumStrategy
-) -> list[SyntheticObservation]:
-    """Walk candles forward, evaluating only on data known at each point.
-
-    No signal ever sees a future candle: at step ``index``, only
-    ``candles[:index]`` (i.e. everything up to and including
-    ``candles[index-1]``) has been used. Only emits when the direction
-    changes from the last emitted signal (matching the live monitor's
-    fresh-signal deduplication convention).
-
-    Every indicator series is computed once, in one linear pass, rather than
-    recomputing EMA/RSI/ATR from scratch over an ever-growing prefix on
-    every step -- the latter is quadratic in the number of candles and
-    became a real, multi-hour bottleneck once the archive grew large (found
-    2026-08-22 training the ML filter on the extended history). ``ema``/
-    ``rsi`` are already pure left-to-right recursions, so ``series[k]`` is
-    exactly what ``strategy.evaluate`` would compute from ``candles[:k+1]``
-    -- computing them once for the whole array and indexing in is provably
-    identical, not an approximation; see ``indicators.atr_series``'s
-    docstring for the same argument applied to ATR (previously only
-    available as a recompute-from-scratch scalar).
-
-    Only used for a strategy that exposes ``signal_from_indicators`` (real
-    ``MomentumStrategy``, whose period attributes this needs to compute the
-    series) or ``signal_from_indicators_with_macro`` (same idea, plus one
-    extra macro-trend EMA series, for ``TrendConfirmedMomentumStrategy``).
-    Anything else -- a test double scripting ``evaluate`` directly, for
-    instance -- falls back to the original, slower per-step call, which is
-    fine at test scale and keeps this optimization from ever silently
-    changing what a custom strategy sees.
-    """
-    observations: list[SyntheticObservation] = []
-    last_signal: str | None = None
-    if len(candles) <= strategy.minimum_candles:
-        return observations
-
-    if hasattr(strategy, "signal_from_indicators_with_macro"):
-        closes = [item.close for item in candles]
-        highs = [item.high for item in candles]
-        lows = [item.low for item in candles]
-        fast_series = ema(closes, strategy.fast_period)
-        slow_series = ema(closes, strategy.slow_period)
-        macro_series = ema(closes, strategy.macro_period)
-        rsi_series = compute_rsi(closes, strategy.rsi_period)
-        atr_values = atr_series(highs, lows, closes, strategy.atr_period)
-
-        def signal_at(index: int) -> tuple:
-            return (
-                strategy.signal_from_indicators_with_macro(
-                    fast_series[index - 1], slow_series[index - 1], macro_series[index - 1],
-                    rsi_series[index - 1], atr_values[index - 1], closes[index - 1],
-                ),
-                rsi_series[index - 1],
-            )
-    elif hasattr(strategy, "signal_from_indicators"):
-        closes = [item.close for item in candles]
-        highs = [item.high for item in candles]
-        lows = [item.low for item in candles]
-        fast_series = ema(closes, strategy.fast_period)
-        slow_series = ema(closes, strategy.slow_period)
-        rsi_series = compute_rsi(closes, strategy.rsi_period)
-        atr_values = atr_series(highs, lows, closes, strategy.atr_period)
-
-        def signal_at(index: int) -> tuple:
-            return (
-                strategy.signal_from_indicators(
-                    fast_series[index - 1], slow_series[index - 1],
-                    rsi_series[index - 1], atr_values[index - 1],
-                ),
-                rsi_series[index - 1],
-            )
-    else:
-        def signal_at(index: int) -> tuple:
-            window = candles[:index]
-            closes = [item.close for item in window]
-            return strategy.evaluate(window), compute_rsi(closes, strategy.rsi_period)[-1]
-
-    for index in range(strategy.minimum_candles, len(candles)):
-        signal, rsi_value = signal_at(index)
-        if signal is None:
-            continue
-        label = signal.direction.value.upper()
-        if label == last_signal:
-            continue
-        last_signal = label
-        decision_candle = candles[index - 1]
-        observations.append(
-            SyntheticObservation(
-                observed_at=decision_candle.started_at,
-                spot=decision_candle.close,
-                signal=label,
-                rsi=rsi_value,
-                atr=signal.stop_distance,
-                confidence=signal.confidence,
-            )
-        )
-    return observations
-
-
-def run_upstox_backtest(
+def run_upstox_ml_backtest(
     archive: MarketArchive,
+    model: SignalQualityModel,
     strategy: MomentumStrategy | None = None,
     start: date | None = None,
     end: date | None = None,
@@ -151,23 +51,23 @@ def run_upstox_backtest(
     timeframe: str = "FIVE_MINUTE",
     include_derived: bool = False,
 ) -> BacktestResult:
-    """Replay Upstox-sourced underlying and option candles for backtesting.
+    """Replay Upstox-sourced candles, keeping only ML-approved signals.
 
-    Only reads ``market_candles``/``instruments`` rows tagged ``source='upstox'``
-    — Angel-sourced data in the same archive is never touched or mixed in.
-    By default also excludes any candle tagged ``derived_from_timeframe``
-    (resampled from a finer timeframe rather than fetched directly from
-    Upstox) so a research script materializing derived candles elsewhere in
-    the archive can never silently change this engine's results — see
-    ``save_upstox_candles``'s docstring and ``BACKTEST_FINDINGS.md``'s
-    2026-08-21 data-integrity entry, where exactly that happened.
+    ``parameters`` still controls the exit shell (stop/target/trailing/max-hold)
+    and any non-ML filters (``entry_start``/``entry_end``/``allowed_weekdays``/
+    ``exclude_expiry_day``/``minimum_atr``/``bullish_rsi_min``/``bearish_rsi_max``)
+    -- those are applied first, exactly as in ``run_upstox_backtest``, and the
+    ML filter is applied on top of whatever survives.
 
-    Pass ``include_derived=True`` to knowingly include derived candles too
-    — e.g. to backtest a period real Upstox data was never pulled for, using
-    only candles resampled from already-archived, real, finer-grained data.
-    Only opt into this for a range/analysis you're explicitly labeling as
-    using derived data; never as the silent default.
+    ``include_derived`` mirrors ``run_upstox_backtest``'s parameter of the
+    same name -- see that function's docstring. Off by default.
     """
+    if any(name in model.feature_names for name in ml_features.POSTCONTRACT_FEATURE_NAMES):
+        raise ValueError(
+            "this backtest path only supports precontract-only models (v1); "
+            f"model requests post-contract features {model.feature_names!r}"
+        )
+
     strategy = strategy or MomentumStrategy()
     variant = parameters or BacktestParameters()
     derived_filter = "" if include_derived else " AND derived_from_timeframe IS NULL"
@@ -201,14 +101,9 @@ def run_upstox_backtest(
         ]
         trading_days = len({candle.started_at.date() for candle in underlying_candles})
 
-        # The set of instrument tokens with usable Upstox candles is constant
-        # for the whole run -- computing it once into a temp table (instead of
-        # a fresh full-table DISTINCT scan inside the per-observation contract
-        # query below) avoids re-scanning all of market_candles once per
-        # signal, which becomes minutes-per-call once the archive is large
-        # (e.g. the 2026-08-21 archive-extension work: a 15-month backtest
-        # against a multi-million-row archive went from effectively hanging
-        # to seconds after this fix).
+        # See run_upstox_backtest's identical comment: precompute the constant
+        # available-token set once instead of re-scanning all of
+        # market_candles per signal (catastrophic once the archive is large).
         con.execute("DROP TABLE IF EXISTS temp.available_upstox_tokens")
         con.execute(
             f"""CREATE TEMP TABLE available_upstox_tokens AS
@@ -234,15 +129,18 @@ def run_upstox_backtest(
                 variant,
             )
         ]
+        # ML filter applied before trade construction -- see module docstring.
+        observations = [
+            observation
+            for observation in observations
+            if model.decide(
+                ml_features.extract_features_precontract(underlying_candles, observation, strategy)
+            )
+        ]
 
         trades: list[OptionBacktestTrade] = []
         for index, observation in enumerate(observations):
             observed_at = observation.observed_at
-            if (
-                variant.minimum_signal_confidence
-                and observation.confidence < variant.minimum_signal_confidence
-            ):
-                continue
             option_type = "CE" if observation.signal == "BULLISH" else "PE"
             contract = con.execute(
                 """SELECT i.token, i.lot_size, i.symbol, i.expiry
@@ -265,18 +163,6 @@ def run_upstox_backtest(
             ).fetchone()
             if entry is None:
                 continue
-            if variant.minimum_option_premium and float(entry[1]) < variant.minimum_option_premium:
-                continue
-            if variant.minimum_open_interest:
-                oi_row = con.execute(
-                    f"""SELECT open_interest FROM market_candles
-                       WHERE instrument_token=? AND source='upstox'{derived_filter}
-                         AND started_at<=? ORDER BY started_at DESC LIMIT 1""",
-                    (contract[0], observed_at.isoformat()),
-                ).fetchone()
-                open_interest = float(oi_row[0]) if oi_row is not None and oi_row[0] is not None else None
-                if open_interest is None or open_interest < variant.minimum_open_interest:
-                    continue
             force_exit = settings.force_exit if settings else time(15, 20)
             session_exit = datetime.combine(
                 observed_at.date(), force_exit, tzinfo=observed_at.tzinfo

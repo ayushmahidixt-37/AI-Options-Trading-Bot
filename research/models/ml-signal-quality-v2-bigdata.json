@@ -1,0 +1,81 @@
+{
+  "bias": -1.1923475778705461,
+  "feature_names": [
+    "rsi",
+    "atr_normalized",
+    "ema_gap_normalized",
+    "confidence",
+    "direction_is_bullish",
+    "minutes_since_open",
+    "day_of_week"
+  ],
+  "means": [
+    50.05374747030838,
+    0.001324692557911822,
+    0.00029997657819645754,
+    0.5873576569702106,
+    0.4967741935483871,
+    177.61290322580646,
+    1.7806451612903227
+  ],
+  "metadata": {
+    "base_params_json": "{\"stop_risk_fraction\":1.6,\"target_return\":0.50,\"trailing_stop\":0.20}",
+    "candidate_name": "ml-signal-quality-v2-bigdata",
+    "dev_metrics_at_chosen_threshold": {
+      "max_drawdown": 2479.55,
+      "net_pnl": 1445.05,
+      "profit_factor": 1.4602583090471868,
+      "trades": 9,
+      "win_rate": 0.3333333333333333
+    },
+    "dev_metrics_unfiltered_baseline": {
+      "max_drawdown": 12462.750000000004,
+      "net_pnl": 26314.3,
+      "profit_factor": 1.403988872547063,
+      "trades": 155,
+      "win_rate": 0.23870967741935484
+    },
+    "dev_range": [
+      "2026-01-01",
+      "2026-05-31"
+    ],
+    "hyperparameters": {
+      "epochs": 2000,
+      "l2": 0.01,
+      "learning_rate": 0.1
+    },
+    "positive_rate": 0.23870967741935484,
+    "trained_at": "2026-08-21T11:38:08.111220",
+    "training_row_count": 155,
+    "val_metrics_at_chosen_threshold": {
+      "max_drawdown": 3641.25,
+      "net_pnl": 6458.55,
+      "profit_factor": 2.1047621491250577,
+      "trades": 20,
+      "win_rate": 0.35
+    },
+    "val_range": [
+      "2026-06-01",
+      "2026-07-31"
+    ]
+  },
+  "stds": [
+    10.135275895030253,
+    0.00048219033077524955,
+    0.0008676531054450054,
+    0.05139368049254301,
+    0.4999895940644532,
+    113.74041680138123,
+    1.433565227391577
+  ],
+  "threshold": 0.36,
+  "weights": [
+    -0.1595607572255204,
+    -0.23487554940628308,
+    -0.05827370895889731,
+    0.3205120413650753,
+    0.052172490384295,
+    -0.053667178562406555,
+    0.000918848010066141
+  ]
+}

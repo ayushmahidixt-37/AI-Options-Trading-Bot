@@ -107,6 +107,7 @@ class Settings:
     upstox_enabled: bool
     upstox_request_timeout_seconds: int
     upstox_max_lookback_days: int
+    ml_signal_filter_enabled: bool
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -154,6 +155,7 @@ class Settings:
             upstox_max_lookback_days=_integer(
                 values, "UPSTOX_MAX_LOOKBACK_DAYS", 180, 1
             ),
+            ml_signal_filter_enabled=_boolean(values, "ML_SIGNAL_FILTER_ENABLED", False),
         )
         settings.validate()
         return settings

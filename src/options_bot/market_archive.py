@@ -158,6 +158,7 @@ class MarketArchive:
                 """
             )
             self._ensure_column(con, "market_candles", "open_interest", "REAL")
+            self._ensure_column(con, "market_candles", "derived_from_timeframe", "TEXT")
             self._ensure_column(con, "range_usage", "params_fingerprint", "TEXT")
 
     @staticmethod
@@ -233,12 +234,23 @@ class MarketArchive:
         exchange: str,
         timeframe: str,
         collected_at: datetime,
+        derived_from_timeframe: str | None = None,
     ) -> int:
         """Store Upstox-sourced candles under ``source='upstox'``.
 
         Kept separate from ``save_candles`` (the always-running Angel path)
         so this read-only backtesting feature can never change Angel
         ingestion behavior.
+
+        ``derived_from_timeframe`` must be set (e.g. ``"ONE_MINUTE"``) when
+        these candles were resampled/aggregated from finer-grained candles
+        rather than fetched directly from Upstox -- left ``None`` for a real,
+        directly-fetched bar. Without this marker a resampled bar is
+        byte-for-byte indistinguishable from a real one once written, which
+        silently broke this project's backtest reproducibility once already
+        (see ``BACKTEST_FINDINGS.md``'s 2026-08-21 data-integrity entry).
+        Every caller reading "real" candles for a documented finding must
+        filter ``WHERE derived_from_timeframe IS NULL``.
         """
         rows = [
             (
@@ -254,6 +266,7 @@ class MarketArchive:
                 "upstox",
                 collected_at.isoformat(),
                 candle.open_interest,
+                derived_from_timeframe,
             )
             for candle in candles
         ]
@@ -262,8 +275,9 @@ class MarketArchive:
             con.executemany(
                 """INSERT OR IGNORE INTO market_candles(
                        instrument_token, symbol, exchange_name, timeframe, started_at,
-                       open, high, low, close, source, collected_at, open_interest
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       open, high, low, close, source, collected_at, open_interest,
+                       derived_from_timeframe
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 rows,
             )
             return con.total_changes - before
@@ -404,19 +418,41 @@ class MarketArchive:
             ).fetchone()
         return datetime.fromisoformat(row[0]) if row and row[0] else None
 
-    def gap_summary(self, source: str = "angel-one") -> list[dict[str, object]]:
+    def gap_summary(
+        self,
+        source: str = "angel-one",
+        start: date | None = None,
+        end: date | None = None,
+    ) -> list[dict[str, object]]:
         """Describe internal same-session gaps grouped by archived instrument.
 
         Scoped to a single ``source`` (default ``"angel-one"``) so Upstox and
         Angel data quality are never conflated -- a real gap in one source
         must not mark the other source's backtests as data-quality-impaired.
+
+        Also scoped to ``[start, end]`` when given. Without this, a backtest
+        over any short window would report the *entire archive's* gap count
+        (found 2026-08-21 while investigating why every chunk of a multi-year
+        backtest reported an identical, suspiciously-constant gap count) --
+        every prior Upstox `DATA QUALITY WARNING`/gap number in
+        `BACKTEST_FINDINGS.md` reflects the whole archive at the time, not
+        the specific range that was backtested.
         """
+        clauses = ["timeframe='FIVE_MINUTE'", "source=?"]
+        sql_parameters: list[object] = [source]
+        if start:
+            clauses.append("date(started_at)>=?")
+            sql_parameters.append(start.isoformat())
+        if end:
+            clauses.append("date(started_at)<=?")
+            sql_parameters.append(end.isoformat())
+        where = " AND ".join(clauses)
         with self.connect() as con:
             rows = con.execute(
-                """SELECT instrument_token, symbol, started_at FROM market_candles
-                   WHERE timeframe='FIVE_MINUTE' AND source=?
+                f"""SELECT instrument_token, symbol, started_at FROM market_candles
+                   WHERE {where}
                    ORDER BY instrument_token, started_at""",
-                (source,),
+                sql_parameters,
             ).fetchall()
         grouped: dict[tuple[str, str], list[datetime]] = {}
         for row in rows:
@@ -506,19 +542,24 @@ class MarketArchive:
             for row in rows
         ]
 
-    def has_upstox_candles(self, token: str, start: date, end: date) -> bool:
-        """Whether any Upstox-sourced candle already exists for a token in [start, end].
+    def has_upstox_candles(self, token: str, start: date, end: date, timeframe: str) -> bool:
+        """Whether any Upstox-sourced candle already exists for a token/timeframe in [start, end].
 
         Used to skip a redundant Upstox API call for data already archived,
         not to prove the range is gap-free — that's a coarser, cheaper check
-        deliberately traded off against always re-fetching.
+        deliberately traded off against always re-fetching. ``timeframe`` is
+        required (not optional): checking presence across all timeframes
+        would wrongly skip fetching, say, one-minute candles for a range
+        that already has five-minute candles for the same token — a real
+        bug this project hit once (see BACKTEST_FINDINGS.md's 2026-08-21
+        multi-timeframe entry) before this parameter was added.
         """
         with self.connect() as con:
             row = con.execute(
                 """SELECT 1 FROM market_candles
-                   WHERE instrument_token=? AND source='upstox'
+                   WHERE instrument_token=? AND source='upstox' AND timeframe=?
                      AND date(started_at)>=? AND date(started_at)<=? LIMIT 1""",
-                (token, start.isoformat(), end.isoformat()),
+                (token, timeframe, start.isoformat(), end.isoformat()),
             ).fetchone()
         return row is not None
 

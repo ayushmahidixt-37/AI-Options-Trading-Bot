@@ -1,0 +1,86 @@
+{
+  "bias": -0.8320224765561406,
+  "feature_names": [
+    "rsi",
+    "atr_normalized",
+    "ema_gap_normalized",
+    "confidence",
+    "direction_is_bullish",
+    "minutes_since_open",
+    "day_of_week",
+    "is_macro_event_window"
+  ],
+  "means": [
+    49.91504557753085,
+    0.0009642585122930433,
+    0.00011772276070465287,
+    0.5802816126212272,
+    0.4980237154150198,
+    178.03359683794466,
+    1.9693675889328064,
+    0.08596837944664032
+  ],
+  "metadata": {
+    "base_params_json": "{\"stop_risk_fraction\":1.6,\"target_return\":0.50,\"trailing_stop\":0.20}",
+    "candidate_name": "ml-signal-quality-v7-macroevent",
+    "dev_metrics_at_chosen_threshold": {
+      "max_drawdown": 23778.5,
+      "net_pnl": 64731.35,
+      "profit_factor": 1.2555876804806037,
+      "trades": 875,
+      "win_rate": 0.32685714285714285
+    },
+    "dev_metrics_unfiltered_baseline": {
+      "max_drawdown": 31634.0,
+      "net_pnl": 62095.65,
+      "profit_factor": 1.1956703099291364,
+      "trades": 1012,
+      "win_rate": 0.3073122529644269
+    },
+    "dev_range": [
+      "2024-10-03",
+      "2026-03-31"
+    ],
+    "hyperparameters": {
+      "epochs": 2000,
+      "l2": 0.05,
+      "learning_rate": 0.1
+    },
+    "include_derived": true,
+    "positive_rate": 0.3073122529644269,
+    "trained_at": "2026-08-22T19:31:04.793763",
+    "training_row_count": 1012,
+    "val_metrics_at_chosen_threshold": {
+      "max_drawdown": 3342.55,
+      "net_pnl": 38707.05,
+      "profit_factor": 2.5728690896087643,
+      "trades": 83,
+      "win_rate": 0.43373493975903615
+    },
+    "val_range": [
+      "2026-04-01",
+      "2026-05-31"
+    ]
+  },
+  "stds": [
+    9.325220319264707,
+    0.0003845303341093386,
+    0.0003308604736137028,
+    0.047450582721476134,
+    0.49999609428398456,
+    115.52589351670693,
+    1.4065243215991388,
+    0.2803173508400056
+  ],
+  "threshold": 0.25,
+  "weights": [
+    -0.20709143289445633,
+    0.04809116932511676,
+    -0.2435012201481269,
+    0.23633374003393395,
+    0.05121564866613216,
+    0.12167290656326675,
+    -0.024059827113253014,
+    0.12582335601751732
+  ]
+}

@@ -194,10 +194,23 @@ def initialize_ledger(archive: MarketArchive) -> None:
     range_usage rows, seed one conservative ``screening`` row spanning the
     full existing candle span, so pre-ledger history can never be
     certified as an untouched test range.
+
+    Scoped to exclude individual option-contract tokens (anything present
+    in ``instruments`` -- option-contract metadata only, never an
+    underlying index): every real ``check_range``/``record_usage`` call in
+    this codebase scopes to the underlying index token, never a specific
+    option contract, so seeding a screening row per contract is both
+    unnecessary and, once an archive has thousands of expired contracts
+    (each traded only a handful of days near its own expiry), a real
+    performance problem -- this seeding loop once took over an hour and
+    left two zombie processes contending for the same write lock before
+    this scope was added.
     """
     with archive.connect() as con:
         scopes = con.execute(
-            "SELECT DISTINCT instrument_token, timeframe FROM market_candles WHERE source='upstox'"
+            """SELECT DISTINCT instrument_token, timeframe FROM market_candles
+               WHERE source='upstox'
+                 AND instrument_token NOT IN (SELECT token FROM instruments)"""
         ).fetchall()
     for underlying_key, timeframe in scopes:
         if _fetch_all_usage(archive, underlying_key, timeframe):
