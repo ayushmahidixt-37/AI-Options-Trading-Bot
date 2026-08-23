@@ -38,6 +38,7 @@ class SyntheticObservation:
     rsi: float | None
     atr: float
     confidence: float
+    ema_gap_normalized: float | None = None
 
 
 def generate_signals_from_candles(
@@ -88,12 +89,17 @@ def generate_signals_from_candles(
         atr_values = atr_series(highs, lows, closes, strategy.atr_period)
 
         def signal_at(index: int) -> tuple:
+            fast_value = fast_series[index - 1]
+            slow_value = slow_series[index - 1]
+            close_value = closes[index - 1]
+            gap = abs(fast_value - slow_value) / close_value if close_value else 0.0
             return (
                 strategy.signal_from_indicators_with_macro(
-                    fast_series[index - 1], slow_series[index - 1], macro_series[index - 1],
-                    rsi_series[index - 1], atr_values[index - 1], closes[index - 1],
+                    fast_value, slow_value, macro_series[index - 1],
+                    rsi_series[index - 1], atr_values[index - 1], close_value,
                 ),
                 rsi_series[index - 1],
+                gap,
             )
     elif hasattr(strategy, "signal_from_indicators"):
         closes = [item.close for item in candles]
@@ -105,21 +111,26 @@ def generate_signals_from_candles(
         atr_values = atr_series(highs, lows, closes, strategy.atr_period)
 
         def signal_at(index: int) -> tuple:
+            fast_value = fast_series[index - 1]
+            slow_value = slow_series[index - 1]
+            close_value = closes[index - 1]
+            gap = abs(fast_value - slow_value) / close_value if close_value else 0.0
             return (
                 strategy.signal_from_indicators(
-                    fast_series[index - 1], slow_series[index - 1],
+                    fast_value, slow_value,
                     rsi_series[index - 1], atr_values[index - 1],
                 ),
                 rsi_series[index - 1],
+                gap,
             )
     else:
         def signal_at(index: int) -> tuple:
             window = candles[:index]
             closes = [item.close for item in window]
-            return strategy.evaluate(window), compute_rsi(closes, strategy.rsi_period)[-1]
+            return strategy.evaluate(window), compute_rsi(closes, strategy.rsi_period)[-1], None
 
     for index in range(strategy.minimum_candles, len(candles)):
-        signal, rsi_value = signal_at(index)
+        signal, rsi_value, ema_gap = signal_at(index)
         if signal is None:
             continue
         label = signal.direction.value.upper()
@@ -135,6 +146,7 @@ def generate_signals_from_candles(
                 rsi=rsi_value,
                 atr=signal.stop_distance,
                 confidence=signal.confidence,
+                ema_gap_normalized=ema_gap,
             )
         )
     return observations
@@ -201,6 +213,25 @@ def run_upstox_backtest(
         ]
         trading_days = len({candle.started_at.date() for candle in underlying_candles})
 
+        # (opening_range_pct, close_time_of_the_range) -- a signal observed
+        # before the range has actually closed can't use this value without
+        # lookahead, so callers must also check observed_at against the
+        # stored close time (see the filter below).
+        opening_range_by_day: dict[object, tuple[float, datetime]] = {}
+        if variant.minimum_opening_range_pct is not None:
+            candles_by_day: dict[object, list[Candle]] = {}
+            for candle in underlying_candles:
+                candles_by_day.setdefault(candle.started_at.date(), []).append(candle)
+            for day, day_candles in candles_by_day.items():
+                day_candles.sort(key=lambda c: c.started_at)
+                opening = day_candles[: variant.opening_range_bars]
+                if len(opening) < variant.opening_range_bars:
+                    continue
+                range_low = min(c.low for c in opening)
+                range_high = max(c.high for c in opening)
+                if range_low > 0:
+                    opening_range_by_day[day] = ((range_high - range_low) / range_low, opening[-1].started_at)
+
         # The set of instrument tokens with usable Upstox candles is constant
         # for the whole run -- computing it once into a temp table (instead of
         # a fresh full-table DISTINCT scan inside the per-observation contract
@@ -243,6 +274,19 @@ def run_upstox_backtest(
                 and observation.confidence < variant.minimum_signal_confidence
             ):
                 continue
+            if variant.minimum_ema_separation and (
+                observation.ema_gap_normalized is None
+                or observation.ema_gap_normalized < variant.minimum_ema_separation
+            ):
+                continue
+            if variant.minimum_opening_range_pct is not None:
+                day_range = opening_range_by_day.get(observed_at.date())
+                if (
+                    day_range is None
+                    or observed_at <= day_range[1]  # signal fires before the range even closed -- can't use it
+                    or day_range[0] < variant.minimum_opening_range_pct
+                ):
+                    continue
             option_type = "CE" if observation.signal == "BULLISH" else "PE"
             contract = con.execute(
                 """SELECT i.token, i.lot_size, i.symbol, i.expiry
@@ -321,6 +365,7 @@ def run_upstox_backtest(
             if settings and stop > 0:
                 active_stop = stop
                 peak_price = buy_fill
+                trailing_active = variant.trailing_activation_return is None
                 for candle in path:
                     if float(candle[1]) <= active_stop:
                         selected_exit, exit_price, exit_reason = (
@@ -341,7 +386,13 @@ def run_upstox_backtest(
                         selected_exit, exit_price, exit_reason = candle, target, "target"
                         break
                     peak_price = max(peak_price, float(candle[2]))
-                    if variant.trailing_stop:
+                    if (
+                        not trailing_active
+                        and variant.trailing_activation_return
+                        and peak_price >= buy_fill * (1 + variant.trailing_activation_return)
+                    ):
+                        trailing_active = True
+                    if variant.trailing_stop and trailing_active:
                         active_stop = max(
                             active_stop, peak_price * (1 - variant.trailing_stop)
                         )

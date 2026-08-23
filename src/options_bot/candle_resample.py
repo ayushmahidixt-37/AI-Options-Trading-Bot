@@ -1,17 +1,24 @@
-"""Aggregate 1-minute candles into any coarser timeframe.
+"""Aggregate candles of any source granularity into a coarser timeframe.
 
 Pure and stateless -- no archive access. Buckets are computed relative to
 the session open per calendar day (default 09:15 IST), not clock-hour
 boundaries, so this works correctly for bucket sizes that don't evenly
 divide an hour (e.g. NIFTY's 375-minute session isn't a clean multiple of
-10 minutes). A bucket is only emitted once it has exactly ``bucket_minutes``
-underlying 1-minute candles -- an incomplete trailing bucket (a data gap, or
-the session's tail end for a bucket size that doesn't evenly divide the
-session length) is dropped by default rather than silently emitted with a
-misleadingly "complete-looking" OHLC built from fewer minutes than every
-other bucket. This mirrors this project's existing fail-closed convention
-(``indicators.py``'s RSI/ATR return ``None`` rather than a value computed
-from an incomplete warm-up window).
+10 minutes). A bucket is only emitted once it has exactly
+``bucket_minutes // source_bucket_minutes`` underlying candles -- an
+incomplete trailing bucket (a data gap, or the session's tail end for a
+bucket size that doesn't evenly divide the session length) is dropped by
+default rather than silently emitted with a misleadingly "complete-looking"
+OHLC built from fewer candles than every other bucket. This mirrors this
+project's existing fail-closed convention (``indicators.py``'s RSI/ATR
+return ``None`` rather than a value computed from an incomplete warm-up
+window). ``source_bucket_minutes`` defaults to 1 (the original 1-minute-only
+behaviour); pass e.g. ``source_bucket_minutes=5`` to build 15-minute bars
+out of 5-minute candles -- the original single-purpose version of this
+function silently assumed 1-minute input and produced wrong bucket-
+completeness checks (and therefore silently dropped everything) if fed
+anything coarser; see BACKTEST_FINDINGS.md's multi-timeframe entries for
+why that mattered.
 """
 
 from __future__ import annotations
@@ -28,10 +35,11 @@ def resample_candles(
     candles: list[Candle],
     bucket_minutes: int,
     *,
+    source_bucket_minutes: int = 1,
     session_open: time = DEFAULT_SESSION_OPEN,
     allow_partial: bool = False,
 ) -> list[Candle]:
-    """Aggregate 1-minute candles into ``bucket_minutes``-sized OHLC bars.
+    """Aggregate ``source_bucket_minutes``-sized candles into ``bucket_minutes``-sized OHLC bars.
 
     Groups by (calendar date, bucket index since session open), so this
     works across multiple days of input in one call. Input does not need to
@@ -40,6 +48,14 @@ def resample_candles(
     """
     if bucket_minutes <= 0:
         raise ValueError("bucket_minutes must be positive")
+    if source_bucket_minutes <= 0:
+        raise ValueError("source_bucket_minutes must be positive")
+    if bucket_minutes % source_bucket_minutes != 0:
+        raise ValueError(
+            f"bucket_minutes ({bucket_minutes}) must be a multiple of "
+            f"source_bucket_minutes ({source_bucket_minutes})"
+        )
+    expected_members = bucket_minutes // source_bucket_minutes
 
     buckets: dict[tuple[str, object, int], list[Candle]] = defaultdict(list)
     seen: set[tuple[str, object]] = set()
@@ -61,7 +77,7 @@ def resample_candles(
 
     result: list[Candle] = []
     for (symbol, day, bucket_index), members in buckets.items():
-        if not allow_partial and len(members) != bucket_minutes:
+        if not allow_partial and len(members) != expected_members:
             continue
         members.sort(key=lambda item: item.started_at)
         result.append(

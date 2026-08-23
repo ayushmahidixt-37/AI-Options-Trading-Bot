@@ -150,6 +150,35 @@ class BacktestParameters:
     candles) is below this, or whose open interest is unknown entirely.
     Only meaningful for ``run_upstox_backtest``, which is the only engine
     with per-contract OI available before a trade is built.
+
+    ``minimum_ema_separation`` skips a trade whose originating signal's fast/
+    slow EMA gap (normalized by price, i.e. ``abs(fast-slow)/close``) is below
+    this -- trend *strength*, not just direction. Only available for
+    strategies that expose ``signal_from_indicators``/``_with_macro`` to
+    ``upstox_backtest.generate_signals_from_candles`` (a bare direction
+    crossover doesn't distinguish a 0.1-point flip from a 5-point one).
+
+    ``minimum_opening_range_pct`` skips a trade whose signal day's opening
+    range (the underlying's high-low over the first ``opening_range_bars``
+    candles) is narrower than this fraction of spot -- the flip side of the
+    filter built for the short-strangle engine (there, a *narrow* opening
+    range selects calm days worth selling premium on; here, a *wide* one is
+    tested as a possible signal for days worth trading trend/breakout
+    strategies on). No lookahead: a signal observed before the opening
+    range has actually finished forming is skipped outright (fails closed),
+    since the range's width genuinely isn't knowable yet at that point --
+    it is not simply assumed narrow or evaluated against a partial range.
+
+    ``trailing_activation_return`` delays ``trailing_stop`` from ratcheting
+    until the position has actually reached this unrealized return -- before
+    that, only the fixed initial stop applies. Without this, trailing_stop
+    starts tightening from the very first candle (peak_price starts at the
+    entry fill), which can clip a winner on ordinary early noise before it
+    has proven itself. Combine with ``target_return=None`` for a "let it run,
+    protect the gain once it's real" exit instead of a hard profit cap --
+    the position is never forced out at a fixed target, only once it pulls
+    back from its own peak by ``trailing_stop`` after clearing the
+    activation threshold.
     """
 
     name: str = "Baseline"
@@ -168,6 +197,10 @@ class BacktestParameters:
     allowed_weekdays: tuple[int, ...] | None = None
     minimum_signal_confidence: float | None = None
     minimum_open_interest: float | None = None
+    minimum_ema_separation: float | None = None
+    trailing_activation_return: float | None = None
+    minimum_opening_range_pct: float | None = None
+    opening_range_bars: int = 6
 
 
 def run_momentum_backtest(

@@ -1158,6 +1158,465 @@ isn't automatically better than a well-targeted, hand-found threshold, especiall
 simple.** **Not adopted** — candidate B's recommendation stays as the plain `minimum_open_interest=100000` hard
 filter found in the sweep above, not this model.
 
+## 2026-08-23 — ORB's premium/OI filters don't transfer from candidate B; a much cleaner signal found instead
+
+**Immediate follow-up, per user request to keep improving both candidates.** Candidate B's premium/OI filters were
+each found via its own loss post-mortem. Ran the same checks on opening-range breakout (`opening_range_bars=6` +
+candidate B's exit shell) for the first time.
+
+**Premium and OI filters do NOT transfer — one actively hurts.** Premium floors are a wash (≥10 gives a marginal
++0.06pp ROI, ≥20 and above are flat-to-negative). Worse, `minimum_open_interest=100000` — a clean free win for
+candidate B — **nearly halves ORB's validation net P&L** (+22,943.80 → +11,255.20, ROI 5.0% → 2.68%), by excluding
+a single trade that turns out to be one of ORB's *best*, not one of its worst. The per-trade post-mortem confirms
+why: winners actually average *higher* OI than losers in aggregate (8.2M vs 3.8M), but the bucket breakdown shows
+no clean monotonic relationship — it's noise, not a filterable pattern, for this strategy. **Neither filter is
+adopted for ORB.** Lesson generalized: a filter validated on one strategy is not automatically portable to another,
+even on the same underlying and timeframe — each needs its own check, not an assumed inheritance.
+
+**The post-mortem found something much cleaner instead: time-of-day.** Winners average 209.7 minutes since session
+open (median ~1:15pm); losers average 96.25 minutes (median ~10:00am, right as the 30-minute opening range
+finishes forming). Every single loser (19/19) exited via stop; every single winner (12/12) exited via target — a
+textbook opening-range "fakeout" pattern, where breakouts taken immediately as the range forms tend to reverse,
+and breakouts confirmed later in the session tend to hold.
+
+**Tested directly with an `entry_start` sweep (9:45 through 12:45), not just eyeballed.** Every threshold from
+10:15 onward looked dramatic on validation: win rate jumped from 42.9% to 62-69%, ROI from 5.0% to 9-10.8%,
+drawdown collapsed from 5,620.15 to ~1,317 — and it held steady across a whole band of cutoffs, not just one lucky
+number. **But development got *worse* for every single variant** (net P&L fell from 29,517.55 to the
+5,463-8,831 range) — the "weak development, strong validation" shape this project's own discipline treats as
+suspicious, not confirmatory, every other time it has shown up. Not trusting one split that points that direction.
+
+**Resolved with the same 7-quarter check that validated candidate B and ORB's core signals — and it rejects the
+pattern.** Ran `entry_start>=10:45` (the representative threshold) unchanged across all 7 quarters, Oct 2024
+through May 2026:
+
+| Quarter | Baseline trades/win%/net P&L | Filtered trades/win%/net P&L |
+|---|---|---|
+| 2024 Q4 | 49 / 46.9% / +20,222.00 | 20 / 55.0% / +13,002.75 |
+| 2025 Q1 | 38 / 44.7% / +23,672.50 | 18 / 44.4% / +12,697.50 |
+| 2025 Q2 | 37 / 43.2% / +50,241.50 | 14 / **28.6%** / +9,727.75 |
+| 2025 Q3 | 51 / 47.1% / +12,169.50 | 27 / 48.1% / +6,663.00 |
+| 2025 Q4 | 39 / 56.4% / +24,171.00 | 14 / 57.1% / +8,429.50 |
+| 2026 Q1 (dev) | 49 / 38.8% / +29,517.55 | 30 / **33.3%** / +5,463.15 |
+| 2026 Q2 (val) | 35 / 42.9% / +22,943.80 | 20 / 65.0% / +19,552.80 |
+| **Total** | **298 / +182,937.85** | **143 / +75,536.45** |
+
+**The dramatic validation result was a fluke of that one 2-month window, not a real pattern.** Across the full
+history, the filter cuts trade count by more than half (298→143) and cuts total P&L by 59% (+182,937.85→+75,536.45)
+— worse than proportionally, since average P&L per trade also drops (₹613.89→₹528.23). Win rate only meaningfully
+improved in the one validation quarter (65.0%) and 2024 Q4 (55.0%); in two other quarters (2025 Q2, 2026 Q1) it was
+**flat or actually worse** with the filter applied, directly contradicting the "later is better" hypothesis in
+those windows. **Rejected — not adopted.** This is exactly the scenario this project's dev/val-shape discipline
+exists to catch: a striking single-split result that does not survive being checked against more history. The
+underlying pattern (early opening-range breakouts reverse more often) may still be real in some quarters, but it
+is not a stable, general rule — the loss post-mortem that surfaced it was accurately describing April-May 2026,
+not NIFTY options generally.
+
+## 2026-08-23 — Exit-shell re-sweep, post-filter: confirms candidate B's pick, reveals why ORB's differs from it
+
+**Immediate follow-up, same day.** Candidate B's original exit-parameter sweep ran *before*
+`minimum_option_premium`/`minimum_open_interest` existed; ORB never got a full systematic exit sweep at all (only
+ever compared 2 points). Re-ran the same 11-combo exit grid for both, with candidate B's filters baked in this time.
+
+**Candidate B: the current pick (`stop=1.6, target=0.30`) remains close to optimal, with one honest caveat.**
+The single best net-P&L/ROI result on validation is actually `stop=1.6, no target, no trailing` (+59,625.20,
+ROI 5.14%, win rate 40.8%) versus the adopted config's +58,586.50/ROI 5.05%/win rate 46.1% — a real but modest
+~1.8% P&L edge, bought with 5.3 points of win rate. Both dev and val improve *together* for the no-target variant
+(a trustworthy shape, not overfitting), but given the difference is small and the win-rate cost is real, **the
+current pick is kept** — win rate matters for an operator watching results day to day, and 1.8% isn't worth trading
+away for it. Documented as a legitimate alternative, not adopted.
+
+**ORB: the picture is the opposite, and reveals *why* the current exit shell is the right one, not just that it
+happens to work.** Several no-target variants show dramatically higher development P&L (`stop=1.3, no target`:
++71,477.00 dev) — but every one of them collapses on validation (that same variant: only +5,536.15 val, ROI
+1.21%, a textbook dev/val instability red flag this project's discipline exists to catch). The best validation
+result adds a small trailing stop (`stop=1.6, target=0.30, trailing=0.20`: +23,389.05, ROI 5.1%, win rate 40.0%)
+— only ₹445.25 above the currently-adopted config, effectively a tie. **Conclusion: unlike candidate B, ORB does
+not tolerate an uncapped target** — letting winners run destabilizes it rather than improving it, likely because a
+session-open breakout's move is often mostly captured early, and removing the cap just exposes it to giving profit
+back or catching random late-session whipsaws it wasn't designed to trade. The current exit shell is confirmed
+correct, and now for an understood reason instead of just "it tested fine once."
+
+## 2026-08-23 — EMA-separation magnitude (trend strength) as a filter: rejected, cleanly
+
+**Continuing the prioritized next-steps list.** Candidate B currently only checks `fast > slow` (direction), not
+*how much* — a 0.1-point crossover and a 5-point crossover count identically. Flagged as an untested dimension
+since the very first candidate-search phase; never tried until now. Added `ema_gap_normalized` to
+`SyntheticObservation` (the normalized `abs(fast-slow)/close` at signal time, computed once in the same O(n) pass
+the fast path already does — no new per-step cost) and a `minimum_ema_separation` filter, then swept it against
+candidate B's real dev/val split with its adopted premium/OI filters already baked in.
+
+| Threshold | Dev trades/net P&L | Val trades/net P&L |
+|---|---|---|
+| None (baseline) | 117 / +65,597.35 | 76 / +58,586.50 |
+| ≥0.0005 | 23 / +10,969.15 | 22 / +12,721.25 |
+| ≥0.001 | 5 / -1,930.30 | 5 / +2,684.70 |
+| ≥0.0015 and above | 0-2 trades | 0-2 trades |
+
+**Monotonic degradation at every threshold, on both splits — a clean rejection, not an ambiguous one.** Even the
+smallest tested floor collapses trade count by 80% and net P&L by 83-88%; higher thresholds crater to near-zero
+trades. **Not adopted.** Most likely explanation: candidate B's RSI-band (52-75 bullish / 25-48 bearish) and
+macro-trend-agreement checks already do the quality filtering a strength requirement would attempt — most weak
+crossovers that survive both of those are already filtered out, so an additional strength floor mostly just cuts
+volume for no offsetting benefit rather than removing a distinct pool of bad trades.
+
+## 2026-08-23 — Real 15-minute multi-timeframe confirmation vs. the same-timeframe proxy: nearly identical
+
+**Continuing the prioritized next-steps list.** Candidate B's "macro trend" has always been a slower EMA (period 60)
+on the *same* 5-minute series, adopted specifically because `candle_resample.resample_candles` assumed 1-minute
+source data and wasn't safely reusable for 5-minute→15-minute aggregation. Generalized `resample_candles` to accept
+`source_bucket_minutes` (defaults to 1, preserving existing behavior exactly) so it can now aggregate candles of any
+source granularity, and built a genuine multi-timeframe variant: real 15-minute bars resampled from the 5-minute
+archive, a period-20 EMA on those bars (20×15min = 300min, matching the existing period-60-on-5min lookback), looked
+up with a no-lookahead pointer walk (a 15-minute bar only becomes usable starting the candle *after* its own bucket
+closes) — otherwise identical entry logic (fast=5/slow=10 on 5-min, RSI 21, same bands) and candidate B's exit shell.
+
+| | Trades (dev/val) | Win rate (dev/val) | Net P&L (dev/val) |
+|---|---|---|---|
+| Candidate B (same-timeframe proxy) | 117 / 76 | 43.6% / 46.1% | +65,597.35 / +58,586.50 |
+| Real 15-min multi-timeframe | 117 / 76 | 43.6% / 47.4% | +65,373.10 / +62,345.45 |
+
+**Exactly the same trade count on both splits, win rate within 1.3 points, net P&L within 0.3% on dev and 6.4%
+better on val.** The proxy and the real resampled confirmation are, in practice, nearly interchangeable — sensible
+in hindsight, since a period-60 EMA on 5-minute bars and a period-20 EMA on 15-minute bars smooth the same
+underlying ~300-minute price history two different ways, and both converge to very similar values. **Retroactively
+validates the original architectural shortcut with real evidence** rather than leaving it as an untested
+assumption, and the generalized resampler is now available infrastructure for any future work that needs genuine
+bar aggregation. Not adopted as a replacement for the proxy (no meaningful benefit to justify the added complexity
+of maintaining a second candle series), but the equivalence itself is the useful result.
+
+## 2026-08-23 — Cross-confirmation: gating ORB with candidate B's macro trend, tested and rejected
+
+**Continuing the prioritized next-steps list.** The two candidates are known to be nearly uncorrelated and running
+them independently in parallel already gives a diversification benefit (see the 2026-08-22 "nearly uncorrelated"
+entry). Tested the *other* kind of combination: using one candidate's state to gate the other's entries, rather
+than running both unconditionally. Specifically: only take an ORB breakout signal if it agrees with candidate B's
+own macro-trend direction (`close` vs. the period-60 EMA on the 5-minute series) at that moment. Composed ORB's
+real `evaluate()` unchanged with a trend-agreement gate on top — no duplicated breakout logic.
+
+Single dev/val split showed a real conflict: development improved on every metric (trades 49→43, net P&L
++29,517.55→+32,396.55, drawdown 4,480.65→3,523.95), but validation got worse on every metric (trades 35→33, net
+P&L +22,943.80→+17,271.30, ROI 5.0%→3.91%) — the classic "looks good where it was inspected, weaker out-of-sample"
+overfitting shape. Resolved with the same 7-quarter check used throughout this project:
+
+| Quarter | Baseline net P&L | Trend-gated net P&L |
+|---|---|---|
+| 2024 Q4 | +20,222.00 | +13,794.75 |
+| 2025 Q1 | +23,672.50 | +21,791.50 |
+| 2025 Q2 | +50,241.50 | +27,554.25 |
+| 2025 Q3 | +12,169.50 | +7,513.75 |
+| 2025 Q4 | +24,171.00 | +21,025.25 |
+| 2026 Q1 (dev) | +29,517.55 | **+32,396.55** |
+| 2026 Q2 (val) | +22,943.80 | +17,271.30 |
+| **Total** | **+182,937.85** | **+141,347.35** |
+
+**Worse in 6 of 7 quarters — the one improvement was exactly the quarter (2026 Q1) the rule happened to be
+inspected against.** Total P&L falls 22.7% (298→274 trades). Both remain profitable every quarter (never
+catastrophic), so this isn't a dangerous idea, just a strictly worse one than running ORB ungated. **Rejected —
+not adopted.** Running both candidates independently in parallel (already established as beneficial) remains the
+right way to combine them; gating one with the other's state actively hurts rather than sharpening the combined
+signal.
+
+## 2026-08-23 — Dynamic exits (trailing-activation): tested, does not beat the hard target
+
+**Direct response to a user request: "follow-up instead of a hard sell" — let a position run further when the
+trend is still favorable, and let the exit trail behind it, instead of exiting the instant a fixed target is
+touched.** Added `trailing_activation_return` to `BacktestParameters`: `trailing_stop` now only starts ratcheting
+once the position has actually reached this unrealized return, instead of from the very first candle (which could
+clip a winner on ordinary early noise before it had proven itself). Swept several activation/trail-width
+combinations against candidate B's real dev/val split, `target_return=None` throughout (no hard cap at all):
+
+| Config | Dev net P&L | Val net P&L |
+|---|---|---|
+| Current (hard target 30%) | +65,597.35 | +58,586.50 |
+| No target, no trailing (ride to reversal/force-exit) | +81,322.15 | +59,625.20 |
+| Trail 20%, activate at +30% | +43,494.75 | +47,765.95 |
+| Trail 10%, activate at +25% | +30,810.65 | +29,673.85 |
+| Trail 15%, activate at +25% | +36,185.50 | +26,393.95 |
+| Trail 10%, activate at +15% | +23,624.90 | +27,960.45 |
+
+**Every trailing-activation variant underperforms both the current hard target and simply removing the target
+entirely.** Win rate rises noticeably with trailing (55-59% vs. the baseline's ~44-46%), but net P&L falls — the
+opposite direction of what the idea was meant to achieve. Likely explanation: option premiums move far more, in
+percentage terms, than the underlying index does, so a 10-20% trailing width gets triggered by ordinary premium
+volatility well before a genuinely large move has played out — the trailing stop protects a smaller profit more
+often instead of letting the big winners fully develop. **Not adopted.** The user's underlying instinct (avoid
+a hard cap, let winners run) is directionally supported by evidence — "no target, no trailing" is a small, real
+improvement over the hard 30% target on both dev and val — but this specific mechanism (percentage trailing stops
+at these widths) is the wrong way to implement it for this instrument. A trail width closer to the option's own
+typical volatility (likely much wider, or points-based rather than percentage-based) would be the next thing to
+try if this is revisited.
+
+## 2026-08-23 — Short strangle (non-directional, sell premium): first backtest, real numbers, needs a 7-quarter check
+
+**Direct response to a user request: strategies that make money when the market isn't moving, not just when it
+moves a lot.** Everything tested in this project up to now buys a single option — max loss is the premium paid,
+capped and known upfront, and profit requires the underlying to move far enough. A short strangle is the opposite
+kind of bet: sell an out-of-the-money call and put, collect the combined premium, and profit if the underlying
+stays inside a range (or the premium decays before it doesn't) — but the risk shape is fundamentally different
+too: a short option's loss is not capped by anything paid upfront, unlike every long-only strategy this project
+has tested. Built `src/options_bot/short_premium_backtest.py` (a new, parallel engine — not a variant of the
+long-only one, since the position mechanics are genuinely different) implementing this as a once-per-day entry at
+a fixed time, evaluated close-to-close (not intrabar high/low peeking — see the module's docstring for why summing
+independent legs' intrabar extremes would overstate the worst case).
+
+**A real, immediate data-coverage limit was hit and worked around, not ignored:** the archive's OTM strike
+coverage turned out to be narrow and asymmetric (built around what the long-only strategies actually selected
+historically, not a full option chain) — a spot-1% OTM call had zero archived data on the sample day checked,
+while the same-distance put had a full day of candles. Confirmed by direct query before writing off the result,
+not assumed; the strike-distance grid was scaled down to 0.1%-0.4% (roughly one to two real strike increments)
+to match what the archive actually has real data for.
+
+| Strike distance | Dev trades/win%/net P&L | Val trades/win%/net P&L |
+|---|---|---|
+| 0.1% | 19 / 36.8% / -29,934.10 | 9 / 77.8% / +9,481.10 |
+| 0.2% | 17 / 47.1% / -17,604.80 | 9 / 77.8% / +10,031.00 |
+| 0.3% | 16 / 37.5% / -17,275.20 | 8 / 75.0% / +7,057.30 |
+| 0.4% | 14 / 50.0% / -10,515.75 | 6 / 83.3% / +7,140.60 |
+
+**Every single combination loses money on development and makes money on validation — striking, and consistent
+across every parameter choice tried, which is itself informative but not yet trustworthy.** This is the same
+"weak development, strong validation" shape this project's discipline has flagged as suspicious every other time
+it appeared this session (the ORB entry-time filter, the ORB trend-gate) — both of those turned out to be flukes
+of one window once checked against more history. The consistency *across every parameter combination* here
+(rather than one lucky threshold) is a bit more encouraging than those cases, and a plausible story exists (Jan-Mar
+2026 may simply have been more volatile — bad for short premium — while Apr-May was calmer), but a plausible story
+is not evidence. **Labeled Open, not Confirmed or even Exploratory yet — needs the same 7-quarter check that
+resolved every other ambiguous result this session before it can be trusted either way.** Sample sizes are also
+small (14-19 dev trades, 6-9 val trades) given only one entry per day. Not adopted, not rejected — genuinely the
+next thing to check, not a finished result.
+
+**Return-on-premium figures (e.g. val return_on_premium ≈6-8%) are NOT comparable to the long-only candidates'
+return-on-capital figures** — premium collected is what changes hands upfront, not the real margin requirement for
+holding a short position (typically several times larger, via SPAN + exposure margin), which this backtest does
+not model. See `short_premium_backtest.py`'s docstring for the full caveat.
+
+**Immediate follow-up, per user request — the 7-quarter check, and it resolves the dev/val split honestly, not in
+the strategy's favor.** Ran the best validation config from the sweep (`strike_distance_pct=0.002,
+stop_multiple=2.0, target_fraction=0.5`) unchanged across all 7 quarters:
+
+| Quarter | Trades | Win rate | Net P&L | Drawdown | Profit factor |
+|---|---|---|---|---|---|
+| 2024 Q4 | 5 | 80.0% | +5,982.50 | 1,054.00 | 6.68 |
+| 2025 Q1 | 10 | 60.0% | +21,357.25 | 9,015.25 | 3.13 |
+| 2025 Q2 | 9 | 55.6% | -2,844.00 | 11,179.00 | 0.85 |
+| 2025 Q3 | 24 | 58.3% | -5,003.25 | 9,930.50 | 0.69 |
+| 2025 Q4 | 16 | 56.2% | -208.70 | 6,504.50 | 0.98 |
+| 2026 Q1 (dev) | 17 | 47.1% | -16,073.40 | 18,002.50 | 0.32 |
+| 2026 Q2 (val) | 9 | 77.8% | +10,031.00 | 2,028.70 | 5.42 |
+| **Total** | **90** | — | **+13,241.40** | — | — |
+
+**Only 3 of 7 quarters profitable, and the total is thin (₹147/trade average) relative to the drawdowns along the
+way.** This is not the same shape as candidate B or ORB, both of which were profitable in literally every quarter
+tested — the short strangle bounces between strongly profitable (2024 Q4, 2025 Q1, 2026 Q2: profit factor 3-7) and
+losing (2025 Q2/Q3, 2026 Q1: profit factor 0.3-0.85) with no obvious pattern tying the good quarters together
+(oldest, newest, and one middle quarter won; the rest lost). The striking dev/val split that motivated this check
+was not a stable "calm periods favor short premium" regime as hypothesized — it was closer to this strategy's
+normal noise, and the two-quarter window happened to land on one losing and one winning quarter, same as several
+other quarter-pairs in the full history would have.
+
+**Rejected as currently configured — real evidence, not a coin-flip guess, but not a confirmed edge either.**
+The underlying idea (sell premium, profit from range-bound decay) is not disproven in principle — a fixed daily
+entry time with no market-condition awareness at all (no volatility regime filter, no signal for whether the day
+actually looks range-bound) is a genuinely simple first version, and the next thing worth trying, if this is
+revisited, is adding some form of entry selectivity rather than entering every single day unconditionally.
+
+## 2026-08-23 — Short strangle, selective deployment: keeps the strategy as a tool, only on calm-looking days
+
+**Direct follow-up per user correction: "keep this strategy also, for the days when you feel like use this."**
+The unconditional every-day version was rejected above for lacking market-condition awareness; the actual ask was
+never to abandon it, but to deploy it selectively. Added `maximum_opening_range_pct` to `ShortStrangleParameters`
+— skip the day's entry if the underlying's opening range (first 30 minutes, same-day, no lookahead since the
+strangle itself only enters after that window closes) is wider than this fraction of spot. Threshold grid pulled
+from the archive's real opening-range distribution (Jan-May 2026: min 0.18%, median 0.48%, p75 0.61%, max 2.24%),
+not guessed.
+
+**Dev/val sweep found a clean, monotonic pattern: tighter filtering → better development results** (unfiltered
+-16,073.40 → +819.50 at the tightest 0.3% threshold), but the tightest thresholds leave validation's 2-month
+window with only 1-2 trades, too thin to trust on their own. The 0.5% threshold was the best balance (full-ish
+samples on both splits) and was carried to the 7-quarter check, the same resolution method used for every other
+ambiguous result this session:
+
+| Quarter | Baseline | Selective (≤0.5% opening range) |
+|---|---|---|
+| 2024 Q4 | 5t / +5,982.50 | 1t / +3,910.75 |
+| 2025 Q1 | 10t / +21,357.25 | 6t / +21,733.50 |
+| 2025 Q2 | 9t / -2,844.00 | 4t / -8,969.00 |
+| 2025 Q3 | 24t / -5,003.25 | 22t / -2,603.75 |
+| 2025 Q4 | 16t / -208.70 | 14t / **+736.55** |
+| 2026 Q1 | 17t / -16,073.40 | 14t / **-5,314.45** |
+| 2026 Q2 | 9t / +10,031.00 | 2t / +3,629.50 |
+| **Total** | **90t / +13,241.40, 3/7 profitable** | **63t / +13,123.10, 4/7 profitable** |
+
+**Honest result: this is a risk trade, not a return improvement.** Total net P&L is essentially unchanged (a
+wash, marginally lower) on 30% fewer trades, and one more quarter turns profitable (4/7 vs 3/7). But the real
+finding is in the worst quarter: 2026 Q1's drawdown falls from 18,002.50 to 7,243.55 — a 59.8% reduction — while
+its loss shrinks by two-thirds (-16,073.40 → -5,314.45). The filter doesn't make the strategy more profitable; it
+makes its worst outcomes meaningfully less bad, at the cost of also trimming some winning days in the best
+quarters (2024 Q4, 2026 Q2) where it turns out "not calm-looking" days still won. **Labeled Open — a genuine,
+real improvement in consistency and worst-case risk, not yet a confirmed edge in total return.** Kept as an
+available, tested tool (not deployed by default) rather than discarded — exactly what was asked for: use it on
+the days it looks suited to, not every day, and not never.
+
+## 2026-08-23 — Rs 1,00,000 compounding-month simulation
+
+## 2026-08-23 — Rs 1,00,000 compounding-month simulation: a naive version caught and corrected before reporting
+
+**Direct response to a user request: if Rs 1,00,000 had been invested and compounded through real trades, what
+would it be worth after a month?** Ran candidate B and ORB's actual April 2026 trades (both individually and
+merged into one chronological account) and applied each trade's own return % to a running balance.
+
+**First attempt used 100%-of-balance position sizing and produced an obviously wrong answer: +1,465% for candidate
+B alone in one month, +2,057% combined.** This is a real trap in naive compounding simulations — individual option
+trades can legitimately return 25-30% (leverage is the whole point of options), and if the *entire* growing
+balance is restaked on every single trade, thirty-odd trades compounding at that rate explodes into a number no
+real trader would ever risk or achieve, since real position sizing is fixed-lot-size constrained and no one puts
+100% of their account on one option position repeatedly. **This number was not reported as an answer** — it was
+caught as unrealistic and replaced with a proper position-sizing model before showing anything.
+
+**Redone with 5% of current balance risked per trade** (a moderately aggressive but plausible sizing rule) for
+April 2026 (2026-04-01 to 2026-04-30):
+
+| | Trades | Final balance | Return |
+|---|---|---|---|
+| Candidate B alone | 32 | Rs 1,17,044.96 | +17.04% |
+| ORB alone | 16 | Rs 1,02,466.09 | +2.47% |
+| Combined (same account, chronological) | 48 | Rs 1,19,931.40 | +19.93% |
+
+Full sensitivity table across sizing assumptions (1%, 2%, 5%, 10%, 25%, 50%, 100%) is in the script output —
+returns scale roughly with sizing aggressiveness as expected, from +3.22% (candidate B, 1%) up through the
+already-rejected +1,465.65% (candidate B, 100%).
+
+**Two honest caveats, stated plainly.** First, April 2026 was a strong month in this backtest for both
+candidates — this is not a claim that every month looks like this; the 7-quarter checks elsewhere in this file
+already show real quarter-to-quarter variance (candidate B's own quarterly net P&L ranges from +26,884.25 to
++64,596.85 at fixed 1-lot sizing). Second, this methodology applies each trade's own % return to the compounding
+balance, assuming the same percentage move would hold at any balance level — real NIFTY lot sizes are fixed
+integers, so true compounding would move in lot-sized steps, not smoothly; this is a standard simplification for
+this kind of what-if simulation, not a claim that every intermediate balance was actually tradeable at those exact
+lot counts.
+
+## 2026-08-23 — Data-integrity bug found and fixed: every short-strangle result above was computed on mixed-timeframe data
+
+**Found while building the "test what worked best, combined" three-way portfolio check.** Every trade in the loss
+post-mortem showed an identical 335-minute holding duration — winners and losers alike, no exceptions. That's the
+signature of a bug, not a real pattern: real stop/target-driven exits should vary. Traced it to
+`short_premium_backtest.py`'s option-leg candle queries, which never filtered by `timeframe` — every prior
+short-strangle backtest this session silently mixed `ONE_MINUTE` and `FIVE_MINUTE` candles for the same contract
+(confirmed directly: one sample contract/day had 375 ONE_MINUTE rows + 75 FIVE_MINUTE rows, all pulled together,
+450 total instead of the intended 75). Fixed by adding `AND timeframe=?` to both leg queries, matching the
+convention every other query in this engine (and `upstox_backtest.py`) already followed. Added a regression test
+that seeds deliberately different prices on the two timeframes so this class of bug fails loudly, not silently, if
+it recurs. Full test suite (274 passing) and ruff both clean after the fix.
+
+**Every short-strangle number reported earlier today needed re-verification, not just an apology.** Re-ran the
+baseline 7-quarter check, the selective 7-quarter check, the three-way portfolio, and the post-mortem, identical
+parameters, only the bug fixed:
+
+| Quarter | Baseline (corrected) | Selective (corrected) |
+|---|---|---|
+| 2024 Q4 | 5t / +5,684.00 | 1t / +3,487.75 |
+| 2025 Q1 | 10t / +19,718.50 | 6t / +21,372.00 |
+| 2025 Q2 | 9t / -4,265.25 | 4t / -9,126.50 |
+| 2025 Q3 | 24t / -4,664.25 | 22t / -2,504.00 |
+| 2025 Q4 | 15t / **+3,648.75** | 13t / +4,282.00 |
+| 2026 Q1 | 17t / -17,096.50 | 14t / -6,104.85 |
+| 2026 Q2 | 9t / +4,928.50 | 2t / +2,878.75 |
+| **Total** | **89t / +7,953.75, 4/7 profitable** | **62t / +14,285.15, 4/7 profitable** |
+
+**The corrected numbers are actually more favorable, not less — an honest surprise given bugs more often overstate
+results than understate them.** 2025 Q4 flipped from a small loss (-208.70) to a small gain; baseline's own
+profitable-quarter count rose from 3/7 to 4/7 (matching selective's own count, which stayed at 4/7). Most
+notably: **selective net P&L (+14,285.15) now exceeds baseline's (+7,953.75) outright**, on 30% fewer trades —
+not just a risk trade anymore, a real return improvement too, alongside the already-known 57.8% worst-quarter
+drawdown reduction (19,002.20 → 8,010.55, both figures also revised down slightly by the fix but the *reduction
+percentage* holds).
+
+**Three-way portfolio (candidate B + ORB + selective strangle), full range, re-verified:**
+
+| | Trades | Net P&L | Drawdown |
+|---|---|---|---|
+| Candidate B alone | 623 | +226,792.45 | 11,135.75 |
+| ORB alone | 298 | +181,041.95 | 7,524.15 |
+| Short strangle alone | 62 | +14,285.15 | 23,944.00 |
+| Candidate B + ORB | 921 | +407,834.40 | 13,909.25 |
+| **All three combined** | **983** | **+422,119.55** | **13,909.25** |
+
+Correlations: candidate B vs. ORB 0.071 (matches the known 0.068), candidate B vs. short strangle **-0.021**, ORB
+vs. short strangle **0.016** — the strangle is essentially uncorrelated with *both* existing candidates, a genuine
+third diversifier, not overlap with days they already handle. **Adding the strangle to the B+ORB portfolio
+increases total profit by 3.5% while the portfolio's own max drawdown does not increase at all** (13,909.25,
+identical with or without the strangle) — its own worst days evidently don't coincide with the combined
+portfolio's worst drawdown period. This is the strongest evidence yet that all three belong together as
+independent parallel signals.
+
+**One more honest finding from the corrected post-mortem: the stop/target mechanism essentially never fires.**
+All 62 trades — winners and losers alike — exit via `force-exit` at exactly 335 minutes (the full session, 9:45 to
+15:20). `stop_multiple=2.0` and `target_fraction=0.5` are wide enough that combined premium on these near-ATM,
+short-dated legs rarely swings 2x or decays to half within one day — the "risk management" these parameters imply
+isn't actually doing anything right now; every trade is really just "hold from entry to end of day." Tightening
+these thresholds (a stop/target that can actually engage intraday) is a real, untested next lever, separate from
+the opening-range selectivity already added.
+
+## 2026-08-23 — The flip side: a wide opening range as a filter for candidate B / ORB, tested and rejected
+
+**Continuing the "build on top of what worked" list.** The short strangle benefits from a *narrow* opening range
+(calm days). Tested the natural flip side: does a *wide* opening range predict good days for the trend/breakout
+strategies instead? Added `minimum_opening_range_pct` to `BacktestParameters` (no lookahead — a signal observed
+before the opening range has actually closed is skipped outright, not evaluated against a partial range) and
+swept it against both candidates' real dev/val split.
+
+| Threshold | Candidate B val net P&L | ORB val net P&L |
+|---|---|---|
+| None (baseline) | +58,586.50 | +22,943.80 |
+| ≥0.4% | +39,947.25 | +13,243.95 |
+| ≥0.5% | +30,906.35 | +8,705.15 |
+| ≥0.6% | +13,496.40 | +693.30 |
+| ≥0.8% | +1,503.25 | -1,867.60 |
+| ≥1.0% | +1,094.50 | -669.85 |
+
+**Monotonic degradation on both strategies, both splits — a clean rejection, no ambiguity requiring a 7-quarter
+check.** Every step up in the threshold makes both strategies worse, eventually negative for ORB. **Not
+adopted.** Makes sense in hindsight: both strategies already select for trending/breaking days through their own
+signal logic (RSI bands, breakout confirmation) — requiring an *additional* wide-open filter on top doesn't
+isolate better trending days, it just discards genuine trends that happened to develop gradually rather than
+gapping hard in the first 30 minutes, cutting real opportunity rather than sharpening the signal.
+
+## 2026-08-23 — Three-way compounding month: the strangle happened to sit out April entirely
+
+**Extending the earlier Rs 1,00,000 compounding simulation to all three kept strategies, same April 2026 window,
+same 5%-of-balance sizing.** The selective short strangle recorded **zero trades in April 2026** — every day that
+month failed its own opening-range-width filter (its 2 validation-period trades, visible in the corrected 7-quarter
+table above, both fell in May instead). Not a bug: the full-range check already used 19 months of data precisely
+because a single calendar month is too short a window to judge a selective, calm-days-only strategy fairly — this
+is that limitation showing up directly. Candidate B + ORB alone: Rs 1,00,000 → Rs 1,19,931.40 (+19.93%); adding
+the (silent, that month) strangle changes nothing for April specifically. The strangle's real, demonstrated
+contribution is in the full-range three-way portfolio numbers above (+3.5% more total profit, zero extra
+drawdown, near-zero correlation with both other candidates) — that is the evidence to trust for this strategy,
+not any single month's compounding curve.
+
+## 2026-08-23 — Tighter short-strangle stop/target: tested, does not help
+
+**Direct follow-up to the finding that the mechanism never engaged at current widths.** Swept
+`stop_multiple` down (2.0 → 1.2) and `target_fraction` up (0.5 → 0.8) — both directions make the mechanism
+easier to trip — on top of the already-adopted selective (opening-range-filtered) config.
+
+| stop / target | Dev net P&L | Dev exit reasons | Val net P&L |
+|---|---|---|---|
+| 2.0 / 0.5 (current) | -6,104.85 | 14 force-exit | +2,878.75 |
+| 1.5 / 0.5 | -6,769.80 | 13 force-exit, 1 stop | +2,878.75 |
+| 1.3 / 0.6 | -5,469.80 | 12 force-exit, 2 stop | +2,878.75 |
+| 1.2 / 0.7 | -7,073.35 | 11 force-exit, 3 stop | +2,878.75 |
+| 1.2 / 0.8 | -7,073.35 | 11 force-exit, 3 stop | +2,878.75 |
+
+**Validation is completely unchanged across every single setting tested — the same 2 trades, the same
++2,878.75, every time.** Even the tightest thresholds never once fire differently on those two trades' actual
+price paths. Development shows a little more stop engagement (up to 3 of 14 trades) but net P&L gets flat-to-worse,
+not better, and win rate drops (50% → 42.9%) as the thresholds tighten. **Not adopted.** Confirms the earlier
+read: near-ATM, short-dated strangle premiums on this underlying just don't swing enough within a single day for
+stop/target tuning to matter much — the real lever for this strategy is entry selectivity (already built, working),
+not exit tuning. This closes out the last open lever from today's list.
+
 ## 2026-08-12 — First full-archive run (Jan–Jul 2026, 277 baseline trades)
 
 **Data used:** a real Upstox archive covering 2026-01-01 to 2026-07-31,
