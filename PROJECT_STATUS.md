@@ -4,8 +4,106 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-22
-**2026-08-22 (latest) — tested whether a learned model beats the simple hard OI filter on candidate B; it doesn't.**
+**Last updated:** 2026-08-23
+**2026-08-23 (latest) — two things done: tighter short-strangle stop/target tested (doesn't help), and the paper
+dashboard is live for the first time.** Swept tighter stop/target settings against the strangle's already-adopted
+selective config — validation was completely unchanged across every setting (same 2 trades, same P&L, never once
+tripped differently), development got flat-to-worse. Not adopted; entry selectivity remains the real lever for
+this strategy, not exit tuning. Separately, actually started `options-bot web` (not just a boot test) on this
+Windows machine, paper mode, live disabled, confirmed responding and requiring login. Paper account is at 0/100
+real trades — that's the actual next milestone now, not more backtesting; markets were closed (Sunday) when this
+was started, so it's ready to catch the next trading session. See `BACKTEST_FINDINGS.md`'s final 2026-08-23 entry.
+
+**2026-08-23 (same day, earlier) — closed out the "build on what worked" batch: the flip-side opening-range filter was
+tested and rejected for candidate B/ORB, and the three-way compounding demo landed on a month the strangle
+happened to sit out entirely.** `minimum_opening_range_pct` (require a *wide* open, the opposite of what helps
+the strangle) was added to `BacktestParameters` and swept against both candidates — cleanly rejected, monotonic
+degradation on both strategies and both splits, no ambiguity. Extending the Rs 1,00,000 compounding simulation to
+all three strategies found the selective strangle recorded zero trades in April 2026 specifically (both its
+real validation-period trades landed in May) — not a bug, just why the full 19-month three-way portfolio check
+(documented in the prior entry) is the number to trust for this strategy, not any one month's curve. This closes
+out the four-item "on top of existing best" list from earlier today. See `BACKTEST_FINDINGS.md`'s two final
+2026-08-23 entries.
+
+**2026-08-23 (same day, earlier) — a real data bug was found and fixed in the short-strangle engine, and the corrected
+numbers are actually better.** Building the three-way portfolio check (candidate B + ORB + short strangle) turned
+up a tell: every single trade in the loss post-mortem held for an identical 335 minutes. Traced to
+`short_premium_backtest.py` never filtering its option-leg queries by `timeframe`, silently mixing `ONE_MINUTE`
+and `FIVE_MINUTE` candles for the same contract. Fixed, regression-tested, and every short-strangle result from
+today was re-run. Corrected: baseline is now 4/7 quarters profitable (was 3/7), and **selective net P&L
+(+14,285.15) now beats baseline's (+7,953.75) outright** on 30% fewer trades — no longer just a risk trade, a
+real return improvement too, plus the already-known ~58% worst-quarter drawdown cut. The three-way portfolio
+result is the headline: candidate B, ORB, and the selective short strangle are all pairwise near-zero correlated,
+and **adding the strangle to the combined B+ORB book increases total profit by 3.5% with zero increase in the
+portfolio's own max drawdown.** Also found: the strangle's stop/target never actually fires at current widths —
+every trade rides to force-exit — a real, untested next lever. See `BACKTEST_FINDINGS.md`'s "data-integrity bug"
+entry for full corrected figures.
+
+**2026-08-23 (same day, earlier) — short strangle kept as a selective tool, not discarded: a real risk improvement, not a
+return improvement.** Per user correction, added `maximum_opening_range_pct` so the strategy only deploys on
+days whose first 30 minutes look calm (same-day, no lookahead). 7-quarter check vs. the unconditional version:
+total net P&L is essentially a wash (+13,123.10 selective vs. +13,241.40 baseline, on 30% fewer trades), but the
+worst quarter's drawdown falls 59.8% (18,002.50 → 7,243.55) and one more quarter turns profitable (4/7 vs 3/7).
+**Labeled Open** — a genuine consistency/risk improvement, not yet a confirmed return edge. The engine and filter
+are real, tested, and available; this is exactly what was asked for — a tool used selectively, not deployed
+blindly and not thrown away. See `BACKTEST_FINDINGS.md`'s "selective deployment" entry.
+
+**2026-08-23 (same day, earlier) — the short strangle's 7-quarter check is in, and it settles the dev/val question: rejected
+as currently configured.** The striking split (every combo lost on dev, won on val) was not a stable regime
+effect as hypothesized — across all 7 quarters the strategy is profitable in only 3 of 7 (2024 Q4, 2025 Q1, 2026
+Q2), losing in the other 4, with profit factor swinging from 6.68 down to 0.32 quarter to quarter. Total is a thin
++13,241.40 over 90 trades. Unlike candidate B and ORB (both profitable in literally every quarter tested), this
+specific config does not show a stable edge. **Rejected, not confirmed** — the underlying idea isn't disproven,
+but a fixed daily entry with zero market-condition awareness is too blunt; adding entry selectivity (a volatility
+or range-bound filter) is the natural next step if this gets revisited. See `BACKTEST_FINDINGS.md`'s 2026-08-23
+"7-quarter check" follow-up under the short strangle entry.
+
+**2026-08-23 (same day, earlier) — three direct user requests actioned: dynamic exits, a short-premium strategy, and a
+compounding simulation.** (1) "Follow-up instead of a hard sell": added `trailing_activation_return` (trailing
+stop only arms after real profit exists, not from candle one) and swept it against candidate B — every variant
+underperformed the current hard target; option premiums move too fast in % terms for a 10-20% trail width not to
+clip winners early. **Not adopted**, though "no target, no trailing" (already known from the earlier exit
+re-sweep) remains a small real edge over the hard cap. (2) A new short-strangle (non-directional, sell premium)
+engine was built from scratch (`short_premium_backtest.py`) and backtested for the first time — every parameter
+combination lost money on development and made money on validation, a striking but not-yet-trustworthy pattern
+(needs the same 7-quarter check that resolved every other dev/val conflict this session). **Labeled Open**, next
+thing to verify, not adopted. (3) A Rs 1,00,000 compounding-month simulation (April 2026): with a realistic 5%
+of current balance risked per trade, candidate B alone ends the month at ~+17%, ORB alone at ~+2.5%, combined at
+~+20% — a naive 100%-of-balance sizing was tried first and produced an absurd +1465%, which was caught and
+rejected rather than reported. See `BACKTEST_FINDINGS.md`'s three 2026-08-23 entries after the cross-confirmation
+one for full detail, caveats, and the sensitivity table across sizing assumptions.
+
+**2026-08-23 (same day, earlier) — three more "next step" ideas tested, all with a clear answer.** (1) EMA-separation
+magnitude (trend strength, not just direction) as a candidate-B filter: cleanly rejected, monotonic degradation at
+every threshold on both dev and val. (2) Real 15-minute multi-timeframe confirmation (the candle resampler was
+generalized to support this — `source_bucket_minutes`, previously 1-minute-only) vs. the existing same-timeframe
+EMA proxy: nearly identical results (same trade count on both splits, P&L within a few percent) — retroactively
+validates the original architectural shortcut rather than changing anything. (3) Gating ORB's entries with
+candidate B's macro-trend agreement: looked promising on one dev/val split (dev improved on every metric) but the
+7-quarter check exposed it as overfit to that one window — worse in 6 of 7 quarters, total P&L down 22.7%.
+**Rejected.** Net effect: candidate B and ORB's recommendations are unchanged after this whole round, but three
+plausible ideas are now ruled out with real evidence instead of left untested, and the codebase gained a properly
+generalized candle resampler as reusable infrastructure. See `BACKTEST_FINDINGS.md`'s three 2026-08-23 entries
+following the exit re-sweep.
+
+**2026-08-23 (same day, earlier) — ORB's loss post-mortem found a striking time-of-day pattern; the 7-quarter check rejects
+it as a general rule.** Ran ORB through the same premium/OI-floor checks and per-trade post-mortem that found
+candidate B's free filters. Neither transfers — `minimum_open_interest=100000` actually **nearly halves** ORB's
+validation net P&L (one excluded trade turns out to be one of its best, not worst), and premium floors are a wash;
+filters don't automatically port between strategies, even on the same underlying. The post-mortem then found
+something that looked much cleaner: winners averaged 210 minutes since session open, losers 96 minutes (right as
+the opening range forms), every loser hit its stop and every winner hit its target. But it showed up as a "weak
+development, strong validation" split — this project's own distrusted shape — and the 7-quarter check confirmed
+the suspicion was right: applying `entry_start>=10:45` across all 7 quarters cuts total trades in half (298→143)
+and total P&L by 59% (+182,937.85→+75,536.45), with win rate flat-to-worse in 2 of the other 6 quarters. **The
+dramatic validation number was a fluke of that one window, not a real pattern — rejected.** A clean demonstration
+of why this project checks striking single-split results against more history before trusting them. Also
+re-swept both candidates' exit shells now that entry filters exist: candidate B's current pick is confirmed
+near-optimal (a marginal alternative exists, not adopted, real win-rate cost); ORB's confirmed correct *and now
+for an understood reason* — removing its target cap looks great on development and collapses on validation,
+unlike candidate B where the same change helps both together. See `BACKTEST_FINDINGS.md`'s 2026-08-23 entries.
+
+**2026-08-22 (same day, earlier) — tested whether a learned model beats the simple hard OI filter on candidate B; it doesn't.**
 Trained a fresh OI-aware ML model (precontract + postcontract features, same architecture as ML v6) directly on
 candidate B's own signal for the first time. Best threshold found barely improves on doing nothing (net P&L
 +56,657.60 vs +56,508.70 unfiltered, ROI 4.63% vs 4.55%) and clearly underperforms the plain hard

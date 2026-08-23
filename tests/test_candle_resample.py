@@ -108,6 +108,41 @@ def test_different_symbols_are_never_mixed_into_the_same_bucket() -> None:
     assert {bar.symbol for bar in result} == {"NIFTY", "NIFTY_PE"}
 
 
+def test_source_bucket_minutes_aggregates_non_1_minute_input_correctly() -> None:
+    """Added 2026-08-23: the original version silently assumed 1-minute
+    input, so feeding it 5-minute candles to build 15-minute bars produced
+    wrong completeness checks (bucket_minutes=15 expected 15 *candles*, not
+    3) -- this is exactly the "not safely reusable for 5-min->15-min
+    aggregation" limitation this project noted when it built the EMA-period
+    proxy for multi-timeframe confirmation instead of real resampling."""
+    start = datetime(2026, 8, 3, 9, 15, tzinfo=IST)
+    five_min_candles = [
+        Candle(
+            "NIFTY", start + timedelta(minutes=5 * i),
+            open=100.0 + i, high=100.0 + i + 1, low=100.0 + i - 1, close=100.0 + i + 0.5,
+        )
+        for i in range(6)  # exactly two complete 15-minute buckets (3 x 5-min each)
+    ]
+
+    result = resample_candles(five_min_candles, bucket_minutes=15, source_bucket_minutes=5)
+
+    assert len(result) == 2
+    assert result[0].started_at == start
+    assert result[0].open == five_min_candles[0].open
+    assert result[0].close == five_min_candles[2].close
+    assert result[0].high == max(c.high for c in five_min_candles[:3])
+    assert result[0].low == min(c.low for c in five_min_candles[:3])
+    assert result[1].started_at == start + timedelta(minutes=15)
+
+
+def test_source_bucket_minutes_must_evenly_divide_bucket_minutes() -> None:
+    start = datetime(2026, 8, 3, 9, 15, tzinfo=IST)
+    candles = _minute_candles(5, start)
+
+    with pytest.raises(ValueError):
+        resample_candles(candles, bucket_minutes=10, source_bucket_minutes=3)
+
+
 def test_bucket_size_that_does_not_evenly_divide_the_session_drops_the_tail() -> None:
     # A 375-minute session (09:15-15:30) is not a multiple of 10 minutes --
     # the last partial bucket of a real session must be dropped, not kept.

@@ -4,6 +4,8 @@ import math
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from options_bot.backtest import BacktestParameters
 from options_bot.candles import Candle
 from options_bot.config import Settings
@@ -88,6 +90,35 @@ def test_generate_signals_fast_path_matches_naive_full_recompute() -> None:
     assert len(fast_tuples) >= 5
     assert "BULLISH" in {o.signal for o in fast_path}
     assert "BEARISH" in {o.signal for o in fast_path}
+
+
+def test_generate_signals_computes_ema_gap_normalized_matching_manual_calculation() -> None:
+    """ema_gap_normalized (added 2026-08-23 for the minimum_ema_separation
+    filter -- trend *strength*, not just direction) must match a manual
+    abs(fast-slow)/close calculation at the decision candle, not just be
+    present."""
+    from options_bot.indicators import ema as compute_ema
+
+    strategy = MomentumStrategy()
+    start = datetime(2026, 1, 5, 9, 15, tzinfo=IST)
+    candles: list[Candle] = []
+    price = 100.0
+    for i in range(400):
+        price += 3 * math.sin(i / 7) + 0.4 * math.sin(i / 37)
+        candles.append(
+            Candle("NIFTY", start + timedelta(minutes=5 * i), price, price + 1.5, price - 1.5, price)
+        )
+
+    observations = generate_signals_from_candles(candles, strategy)
+    assert observations
+    closes = [item.close for item in candles]
+    for observation in observations:
+        index = next(i for i, c in enumerate(candles) if c.started_at == observation.observed_at)
+        window_closes = closes[: index + 1]
+        fast = compute_ema(window_closes, strategy.fast_period)[-1]
+        slow = compute_ema(window_closes, strategy.slow_period)[-1]
+        expected = abs(fast - slow) / window_closes[-1]
+        assert observation.ema_gap_normalized == pytest.approx(expected)
 
 
 def test_generate_signals_dedups_and_uses_last_closed_candle() -> None:
@@ -279,6 +310,174 @@ def test_run_upstox_backtest_minimum_open_interest_skips_low_or_unknown_oi(tmp_p
         parameters=BacktestParameters(minimum_open_interest=200),
     )
     assert kept.trades == 1
+
+
+def test_run_upstox_backtest_minimum_ema_separation_skips_weak_trend_signals(tmp_path) -> None:
+    """minimum_ema_separation filters on trend *strength* (the normalized
+    fast/slow EMA gap), not just direction -- a bare crossover doesn't
+    distinguish a 0.1-point flip from a 5-point one. Only meaningful for
+    strategies whose fast path computes ema_gap_normalized (ScriptedStrategy
+    doesn't, so its observations carry ema_gap_normalized=None -- confirming
+    the filter fails closed rather than silently passing everything)."""
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    _seed_upstox_backtest_archive(archive, start)
+    settings = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3")}
+    )
+    strategy = ScriptedStrategy({2: Signal(Direction.BULLISH, 0.6, 10.0, "test")})
+
+    skipped = run_upstox_backtest(
+        archive, strategy=strategy, settings=settings,
+        parameters=BacktestParameters(minimum_ema_separation=0.01),
+    )
+    assert skipped.trades == 0
+
+    kept = run_upstox_backtest(
+        archive, strategy=strategy, settings=settings,
+        parameters=BacktestParameters(minimum_ema_separation=None),
+    )
+    assert kept.trades == 1
+
+
+def test_run_upstox_backtest_trailing_activation_return_lets_early_noise_survive(tmp_path) -> None:
+    """Added 2026-08-23 per explicit user request: 'follow-up instead of a
+    hard sell' -- trailing_stop alone starts ratcheting from the very first
+    candle (peak_price begins at the entry fill), which can stop a winner
+    out on ordinary early noise before it has proven itself.
+    trailing_activation_return delays trailing until the position has
+    actually reached that unrealized return; before that, only the fixed
+    initial stop applies. Same exact price path, same trailing_stop=5%:
+    without activation the position is stopped out at a small LOSS during
+    routine early movement; with a 10% activation threshold it survives
+    that same movement, later clears activation, and exits at a locked-in
+    PROFIT instead."""
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    underlying = _underlying_candles(4, start=start)
+    archive.save_upstox_candles(
+        [UpstoxCandle(c.symbol, c.started_at, c.open, c.high, c.low, c.close) for c in underlying],
+        token=NIFTY_UNDERLYING_KEY, exchange="NSE_INDEX", timeframe="FIVE_MINUTE", collected_at=start,
+    )
+    archive.save_instruments(
+        [Instrument("NIFTY13AUG2626600CE", "NSE_FO|1|13-08-2026", "NFO", "NIFTY", "CE", 80, date(2026, 8, 13), 100)],
+        start,
+    )
+    # path[0] is the entry candle itself (query is started_at>=entry time).
+    option_candles = [
+        UpstoxCandle("NIFTY13AUG2626600CE", start + timedelta(minutes=10), 100, 100, 100, 100),
+        UpstoxCandle("NIFTY13AUG2626600CE", start + timedelta(minutes=15), 100, 104, 99, 101),
+        # Without activation, trailing would already be at 104*0.95=98.8 here -- this
+        # candle's low (97) would stop it out at a loss. With activation still
+        # pending (peak 104 < 110 threshold), only the wide initial stop (96) applies.
+        UpstoxCandle("NIFTY13AUG2626600CE", start + timedelta(minutes=20), 101, 101, 97, 98),
+        # Clears the 10% activation threshold (peak 112 >= 110) -- trailing now arms.
+        UpstoxCandle("NIFTY13AUG2626600CE", start + timedelta(minutes=25), 98, 112, 98, 110),
+        # Pulls back into the now-armed trailing stop (112*0.95=106.4) -- locked-in profit.
+        UpstoxCandle("NIFTY13AUG2626600CE", start + timedelta(minutes=30), 110, 111, 105, 106),
+    ]
+    archive.save_upstox_candles(
+        option_candles, token="NSE_FO|1|13-08-2026", exchange="NFO", timeframe="FIVE_MINUTE",
+        collected_at=start + timedelta(minutes=30),
+    )
+    settings = Settings.from_env({
+        "DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3"),
+        "PAPER_SLIPPAGE_BPS": "0", "PAPER_FEE_PER_ORDER": "0",
+    })
+    strategy = ScriptedStrategy({2: Signal(Direction.BULLISH, 0.6, 10.0, "test")})
+
+    without_activation = run_upstox_backtest(
+        archive, strategy=strategy, settings=settings,
+        parameters=BacktestParameters(stop_risk_fraction=0.8, target_return=None, trailing_stop=0.05),
+    )
+    assert without_activation.trades == 1
+    stopped_early = without_activation.trade_details[0]
+    assert stopped_early.exit_reason == "stop"
+    assert stopped_early.entry_price == pytest.approx(100.0)
+    assert stopped_early.exit_price == pytest.approx(98.8)  # 104 * 0.95, stopped out at a loss
+    assert stopped_early.net_pnl < 0
+
+    with_activation = run_upstox_backtest(
+        archive, strategy=strategy, settings=settings,
+        parameters=BacktestParameters(
+            stop_risk_fraction=0.8, target_return=None, trailing_stop=0.05,
+            trailing_activation_return=0.10,
+        ),
+    )
+    assert with_activation.trades == 1
+    locked_in_profit = with_activation.trade_details[0]
+    assert locked_in_profit.exit_reason == "stop"
+    assert locked_in_profit.exit_price == pytest.approx(106.4)  # 112 * 0.95, survived the same dip
+    assert locked_in_profit.net_pnl > 0
+    assert locked_in_profit.exit_at > stopped_early.exit_at  # rode the move further
+
+
+def test_run_upstox_backtest_minimum_opening_range_pct_requires_a_wide_open_and_no_lookahead(tmp_path) -> None:
+    """The flip side of the short-strangle engine's opening-range filter:
+    there, a NARROW range selects calm days; here, a WIDE one is tested as
+    a signal for trend/breakout-worthy days. Also confirms the no-lookahead
+    guard: a signal observed before the opening range has actually closed
+    must be skipped, not evaluated against an as-yet-incomplete range."""
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    # First 6 candles (the opening range) span 85-115 around a 100 base --
+    # a wide ~35% range. Candle 6 (index 6, 0-based) is where the signal
+    # fires -- strictly after the range has closed.
+    underlying = [
+        Candle("NIFTY", start, 100, 100, 100, 100),
+        Candle("NIFTY", start + timedelta(minutes=5), 100, 115, 100, 110),
+        Candle("NIFTY", start + timedelta(minutes=10), 110, 110, 85, 90),
+        Candle("NIFTY", start + timedelta(minutes=15), 100, 100, 100, 100),
+        Candle("NIFTY", start + timedelta(minutes=20), 100, 100, 100, 100),
+        Candle("NIFTY", start + timedelta(minutes=25), 100, 100, 100, 100),
+        Candle("NIFTY", start + timedelta(minutes=30), 100, 100, 100, 100),
+        Candle("NIFTY", start + timedelta(minutes=35), 100, 100, 100, 100),
+    ]
+    archive.save_upstox_candles(
+        [UpstoxCandle(c.symbol, c.started_at, c.open, c.high, c.low, c.close) for c in underlying],
+        token=NIFTY_UNDERLYING_KEY, exchange="NSE_INDEX", timeframe="FIVE_MINUTE", collected_at=start,
+    )
+    archive.save_instruments(
+        [Instrument("NIFTY13AUG2626600CE", "NSE_FO|1|13-08-2026", "NFO", "NIFTY", "CE", 75, date(2026, 8, 13), 100)],
+        start,
+    )
+    archive.save_upstox_candles(
+        [
+            UpstoxCandle("NIFTY13AUG2626600CE", start + timedelta(minutes=35 + 5 * i), 100, 108, 99, 106)
+            for i in range(3)
+        ],
+        token="NSE_FO|1|13-08-2026", exchange="NFO", timeframe="FIVE_MINUTE", collected_at=start + timedelta(minutes=45),
+    )
+    settings = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3")}
+    )
+    # Signal at len(history)==7 -> decision candle = underlying[6], strictly
+    # after the opening range (underlying[0:6]) has closed.
+    strategy = ScriptedStrategy({7: Signal(Direction.BULLISH, 0.6, 10.0, "test")})
+
+    kept = run_upstox_backtest(
+        archive, strategy=strategy, settings=settings,
+        parameters=BacktestParameters(minimum_opening_range_pct=0.05),
+    )
+    assert kept.trades == 1
+
+    skipped_too_narrow = run_upstox_backtest(
+        archive, strategy=strategy, settings=settings,
+        parameters=BacktestParameters(minimum_opening_range_pct=0.50),  # wider than the real ~35% range
+    )
+    assert skipped_too_narrow.trades == 0
+
+    # No-lookahead guard: a signal before the range closes must be skipped
+    # even though the (not-yet-known) eventual range is plenty wide.
+    early_strategy = ScriptedStrategy({2: Signal(Direction.BULLISH, 0.6, 10.0, "test")})
+    skipped_too_early = run_upstox_backtest(
+        archive, strategy=early_strategy, settings=settings,
+        parameters=BacktestParameters(minimum_opening_range_pct=0.05),
+    )
+    assert skipped_too_early.trades == 0
 
 
 def test_run_upstox_backtest_exclude_macro_event_days_skips_known_event_dates(tmp_path) -> None:

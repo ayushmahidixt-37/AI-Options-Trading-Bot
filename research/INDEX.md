@@ -69,12 +69,45 @@ rather than folding into it. Labeled **Open** — same test-range
 constraint as candidate B (see below). Full detail: grep
 `BACKTEST_FINDINGS.md` for `## 2026-08-22 — Opening-range breakout`.
 
+**2026-08-23 follow-up: candidate B's premium/OI filters do NOT transfer to
+ORB** — `minimum_open_interest=100000` nearly halves its validation P&L
+(excludes one of its *best* trades, not a worst one); premium floors are
+a wash. A time-of-day pattern from ORB's own loss post-mortem (early
+breakouts lose, late ones win) looked dramatic on one dev/val split but
+was **rejected by the 7-quarter check** — cuts total trades in half and
+total P&L by 59% with no consistent win-rate benefit. The exit shell was
+also re-swept (systematically, for the first time) and confirmed correct
+for an understood reason: unlike candidate B, ORB does not tolerate an
+uncapped target. Current recommendation for ORB is unchanged:
+`opening_range_bars=6` + `stop_risk_fraction=1.6, target_return=0.30`,
+no additional filters. Grep `## 2026-08-23` entries in
+`BACKTEST_FINDINGS.md` for the full analysis.
+
+**2026-08-23, second round: three more ideas tested, all rejected or
+neutral.** EMA-separation (trend strength) filter on candidate B —
+rejected, monotonic degradation at every threshold. Real 15-minute
+multi-timeframe confirmation vs. the existing same-timeframe EMA proxy —
+nearly identical results, validates the original shortcut rather than
+replacing it (the candle resampler was generalized to support real
+resampling of non-1-minute source data along the way — see
+`candle_resample.py`). Gating ORB's entries with candidate B's macro
+trend — looked good on one dev/val split, rejected by the 7-quarter check
+(worse in 6/7 quarters). Neither candidate's recommendation changed.
+Grep the three `## 2026-08-23` entries after the exit re-sweep in
+`BACKTEST_FINDINGS.md`.
+
 **Diversification check: the two candidates are nearly uncorrelated
 (daily P&L correlation 0.068).** Running both together (independent
 parallel signals, not merged) gives a meaningfully better P&L-to-drawdown
 ratio than either alone. Working plan once either gets its formal test
 confirmation. Grep `## 2026-08-22 — Candidate B and opening-range
 breakout: nearly uncorrelated` for the full analysis.
+
+**Extended to three, 2026-08-23: the selective short strangle (see below)
+is also near-zero correlated with both** (-0.021 vs. candidate B, 0.016
+vs. ORB) and adds 3.5% more total profit to the combined book with no
+increase in the portfolio's own max drawdown. See the "Data-integrity
+bug found and fixed" 2026-08-23 entry for the full three-way numbers.
 
 ## Data coverage (verify freshness before trusting this)
 
@@ -130,6 +163,41 @@ breakout: nearly uncorrelated` for the full analysis.
   keeping, then re-run the build script. Do this going forward instead of
   only printing to console -- the first ~180 rows had to be reconstructed
   after the fact because nothing was recording this as it ran.
+- `src/options_bot/short_premium_backtest.py` — a new, separate engine for
+  short-premium (non-directional) strategies, starting with a short
+  strangle. Not a variant of `upstox_backtest.py`: selling options has a
+  genuinely different risk shape (uncapped loss, not capped by a premium
+  paid upfront) so it gets its own `ShortStrangleParameters`/
+  `ShortPremiumResult` rather than reusing the long-only types. Run
+  unconditionally (every day), the 7-quarter check came back **Rejected**
+  (only 3/7 profitable, later corrected to 4/7 -- see below). Per user
+  correction, kept as a *selective* tool instead of discarded:
+  `maximum_opening_range_pct` skips days whose first 30 minutes already
+  moved too much (same-day, no lookahead).
+  **A real data bug (option-leg queries never filtered by `timeframe`,
+  silently mixing ONE_MINUTE and FIVE_MINUTE candles) was found and fixed
+  2026-08-23** -- every short-strangle number above was re-verified after
+  the fix, and came back *more* favorable: selective net P&L (+14,285.15)
+  now beats baseline's (+7,953.75) outright on 30% fewer trades, plus a
+  ~58% worst-quarter drawdown cut. Correlation with candidate B and ORB is
+  near-zero (-0.021 and 0.016) -- a genuine third diversifier. Adding it
+  to the combined B+ORB book raises total profit 3.5% with **zero**
+  increase in the portfolio's own max drawdown. Labeled **Open**,
+  available as a tool, not deployed by default. See the 2026-08-23
+  entries, especially "Data-integrity bug found and fixed." Tighter
+  stop/target settings were also tried and don't help -- validation was
+  unchanged across every setting tested; entry selectivity (already
+  built) remains the real lever for this strategy, not exit tuning.
+- `BacktestParameters.trailing_activation_return` — lets `trailing_stop`
+  wait until a position is in real profit before it starts ratcheting,
+  instead of from the very first candle. Tested against candidate B and
+  not adopted (see 2026-08-23 entry) but the mechanism itself is real,
+  tested infrastructure available for future use.
+- `BacktestParameters.minimum_opening_range_pct` — the flip side of the
+  strangle's filter (require a *wide*, not narrow, opening range).
+  Tested against candidate B/ORB and rejected -- monotonic degradation on
+  both, both splits. Real, tested infrastructure; just not a working
+  filter for these two strategies.
 
 ## The one real constraint blocking further progress
 
