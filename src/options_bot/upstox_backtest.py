@@ -162,6 +162,7 @@ def run_upstox_backtest(
     underlying_key: str = NIFTY_UNDERLYING_KEY,
     timeframe: str = "FIVE_MINUTE",
     include_derived: bool = False,
+    include_dhan: bool = False,
 ) -> BacktestResult:
     """Replay Upstox-sourced underlying and option candles for backtesting.
 
@@ -179,12 +180,23 @@ def run_upstox_backtest(
     only candles resampled from already-archived, real, finer-grained data.
     Only opt into this for a range/analysis you're explicitly labeling as
     using derived data; never as the silent default.
+
+    Pass ``include_dhan=True`` to also read DhanHQ-reconstructed candles
+    (``source='dhan'``) alongside real Upstox ones — e.g. to backtest the
+    2020-08..2024-10 period Upstox itself has no data for. Dhan option
+    candles are reconstructed from a wide ATM-relative band, not fetched
+    per-contract the way Upstox data is; see ``dhan_ingest.py``'s module
+    docstring and BACKTEST_FINDINGS.md's 2026-08-23/24 entries for the
+    validation performed before trusting this. Only opt into this for a
+    range/analysis explicitly labeling itself as using Dhan-reconstructed
+    data; never as the silent default.
     """
     strategy = strategy or MomentumStrategy()
     variant = parameters or BacktestParameters()
     derived_filter = "" if include_derived else " AND derived_from_timeframe IS NULL"
+    source_clause = "source IN ('upstox','dhan')" if include_dhan else "source='upstox'"
     with archive.connect() as con:
-        clauses = ["instrument_token=?", "source='upstox'", "timeframe=?"]
+        clauses = ["instrument_token=?", source_clause, "timeframe=?"]
         if not include_derived:
             clauses.append("derived_from_timeframe IS NULL")
         sql_parameters: list[object] = [underlying_key, timeframe]
@@ -244,7 +256,7 @@ def run_upstox_backtest(
         con.execute(
             f"""CREATE TEMP TABLE available_upstox_tokens AS
                 SELECT DISTINCT instrument_token FROM market_candles
-                WHERE source='upstox'{derived_filter}"""
+                WHERE {source_clause}{derived_filter}"""
         )
         con.execute(
             "CREATE INDEX temp.available_upstox_tokens_idx ON available_upstox_tokens(instrument_token)"
@@ -302,10 +314,10 @@ def run_upstox_backtest(
                 continue
             entry = con.execute(
                 f"""SELECT started_at, open FROM market_candles
-                   WHERE instrument_token=? AND source='upstox'{derived_filter}
+                   WHERE instrument_token=? AND {source_clause} AND timeframe=?{derived_filter}
                      AND started_at>? AND date(started_at)=?
                    ORDER BY started_at LIMIT 1""",
-                (contract[0], observed_at.isoformat(), observed_at.date().isoformat()),
+                (contract[0], timeframe, observed_at.isoformat(), observed_at.date().isoformat()),
             ).fetchone()
             if entry is None:
                 continue
@@ -314,9 +326,9 @@ def run_upstox_backtest(
             if variant.minimum_open_interest:
                 oi_row = con.execute(
                     f"""SELECT open_interest FROM market_candles
-                       WHERE instrument_token=? AND source='upstox'{derived_filter}
+                       WHERE instrument_token=? AND {source_clause} AND timeframe=?{derived_filter}
                          AND started_at<=? ORDER BY started_at DESC LIMIT 1""",
-                    (contract[0], observed_at.isoformat()),
+                    (contract[0], timeframe, observed_at.isoformat()),
                 ).fetchone()
                 open_interest = float(oi_row[0]) if oi_row is not None and oi_row[0] is not None else None
                 if open_interest is None or open_interest < variant.minimum_open_interest:
@@ -338,7 +350,7 @@ def run_upstox_backtest(
                 next_observed = min(next_observed, hold_exit.isoformat())
             path = con.execute(
                 f"""SELECT started_at, open, high, low, close FROM market_candles
-                   WHERE instrument_token=? AND source='upstox'{derived_filter}
+                   WHERE instrument_token=? AND {source_clause}{derived_filter}
                      AND started_at>=? AND started_at<=?
                    ORDER BY started_at""",
                 (contract[0], entry[0], next_observed),

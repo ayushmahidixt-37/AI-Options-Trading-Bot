@@ -7,12 +7,15 @@ credentials.env
 *.db-journal
 *.sqlite
 *.sqlite3
+*.sqlite3.pre-cleanup-backup
 data/
 trading_data/
 trades/
 trade_logs/
 *.parquet
 *.feather
+.termux-data/
+logs/
 
 # Python caches
 __pycache__/

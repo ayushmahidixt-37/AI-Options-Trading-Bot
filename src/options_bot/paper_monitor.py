@@ -222,7 +222,8 @@ class PaperPositionMonitor:
                     lots=1,
                     quote=proposal.quote,
                     stop_price=proposal.stop_price,
-                    strategy="momentum-v1-auto-paper",
+                    target_price=proposal.target_price,
+                    strategy="candidate-b-auto-paper",
                     reason=f"Auto-paper {proposal.direction} signal",
                 ),
                 now,
@@ -330,6 +331,9 @@ class PaperPositionMonitor:
     ) -> str | None:
         if price <= float(position["stop_price"]):
             return "paper-stop"
+        target_price = position["target_price"]
+        if target_price is not None and price >= float(target_price):
+            return "paper-target"
         if self.application.clock.force_exit_due(now):
             return "paper-force-exit"
         option_type = str(position["option_type"])

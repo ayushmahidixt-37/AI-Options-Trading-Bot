@@ -62,6 +62,7 @@ class PaperLedger:
                     entry_fill_price REAL NOT NULL,
                     exit_fill_price REAL,
                     stop_price REAL NOT NULL,
+                    target_price REAL,
                     entry_fee REAL NOT NULL,
                     exit_fee REAL NOT NULL DEFAULT 0,
                     realized_pnl REAL,
@@ -106,6 +107,19 @@ class PaperLedger:
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, datetime('now'))",
                 (SCHEMA_VERSION,),
             )
+            self._ensure_column(con, "paper_orders", "target_price", "REAL")
+
+    @staticmethod
+    def _ensure_column(con: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
+        """Add a nullable column if missing (SQLite has no ADD COLUMN IF NOT EXISTS).
+
+        Added 2026-08-24 alongside ``target_price`` -- an existing
+        ``paper.sqlite3`` created before profit-target exits were wired in
+        won't have this column from ``CREATE TABLE IF NOT EXISTS`` alone.
+        """
+        existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
 
     def create_account(self, starting_capital: float) -> None:
         with self.connect() as con:

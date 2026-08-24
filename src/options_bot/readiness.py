@@ -11,7 +11,7 @@ from pathlib import Path
 from .config import Settings
 from .connections import ConnectionSnapshot
 from .ledger import PaperLedger
-from .market_archive import MarketArchive
+from .market_archive import ArchiveStats, MarketArchive
 
 
 MANUAL_REVIEW_FIELDS = {
@@ -69,9 +69,19 @@ def build_readiness_report(
     *,
     web_password: str,
     observed_at: datetime | None = None,
+    archive_stats: ArchiveStats | None = None,
 ) -> ReadinessReport:
+    """``archive_stats``, when given, is used instead of a fresh ``archive.stats()``.
+
+    Added 2026-08-24: this is called on every dashboard page load, and an
+    uncached ``archive.stats()`` runs a full ``PRAGMA quick_check`` -- fine
+    occasionally, not on every page view of a 6+ GB archive. Callers with a
+    cached figure (e.g. ``ConnectionManager.cached_archive_stats``) should
+    pass it; callers that don't (tests, one-off scripts) still get a fresh
+    one computed here, unchanged from before.
+    """
     now = (observed_at or datetime.now(settings.timezone)).astimezone(settings.timezone)
-    archive_stats = archive.stats()
+    archive_stats = archive_stats if archive_stats is not None else archive.stats()
     metrics = archive.readiness_metrics()
     performance = ledger.performance_summary()
     closed_trades = int(performance["trades"])

@@ -1,11 +1,20 @@
-"""Backtest-only experimental strategies -- alternatives to MomentumStrategy's
+"""Experimental strategies -- alternatives to MomentumStrategy's
 trend-following approach, for checking whether a genuinely different signal
-shape does better than parameter-tuning the existing one. Never imported by
-service.py/connections.py (the live/forward-paper path); only used through
-run_upstox_backtest for research. Each implements the same duck-typed
-interface MomentumStrategy does (evaluate(candles) -> Signal | None, plus
-minimum_candles/rsi_period/etc.) so they drop into the existing backtest
-engines unchanged.
+shape does better than parameter-tuning the existing one. Each implements
+the same duck-typed interface MomentumStrategy does (evaluate(candles) ->
+Signal | None, plus minimum_candles/rsi_period/etc.) so they drop into the
+existing backtest engines unchanged.
+
+``TrendConfirmedMomentumStrategy`` ("Candidate B") was imported into
+connections.py (the live/forward-paper path) on 2026-08-24, wiring the
+project's best-proven strategy into live paper trading -- see the
+CANDIDATE_B_* constants near the top of connections.py for the exact
+parameters and provenance, and research/INDEX.md's "Current best candidate"
+section for the validation history. It was still labeled "Open, not
+Confirmed" there at the time this was wired in (see that entry for why, and
+what would confirm it) -- a deliberate, informed choice, not an oversight.
+The other strategies in this file remain backtest-only, used only through
+run_upstox_backtest for research.
 """
 
 from __future__ import annotations

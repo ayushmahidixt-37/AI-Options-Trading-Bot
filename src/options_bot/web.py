@@ -181,6 +181,12 @@ def create_web_app(
             connections.snapshot(),
             web_password=password,
             observed_at=now,
+            # include_integrity=False: PRAGMA quick_check is a full page-by-page
+            # scan -- on the 6+ GB archive after the 2026-08-24 DhanHQ backfill,
+            # even running it once on first page load stalled the dashboard for
+            # minutes. The live page shows "not checked live" for this one
+            # criterion; /readiness/report.csv still runs a real, on-demand check.
+            archive_stats=connections.cached_archive_stats(now=now, include_integrity=False),
         )
         return {
             "request": request,

@@ -282,6 +282,68 @@ class MarketArchive:
             )
             return con.total_changes - before
 
+    def save_dhan_candles(
+        self,
+        candles: list[UpstoxCandle],
+        *,
+        token: str,
+        exchange: str,
+        timeframe: str,
+        collected_at: datetime,
+    ) -> int:
+        """Store DhanHQ-reconstructed candles under ``source='dhan'``.
+
+        These are reconstructed from Dhan's ATM-relative "rolling option" feed
+        (see ``dhan_ingest.py``) rather than fetched directly for one fixed
+        contract the way Upstox candles are -- kept under a distinct
+        ``source`` value so this reconstruction can never be silently
+        conflated with a directly-fetched Upstox/Angel candle.
+        """
+        rows = [
+            (
+                token,
+                candle.symbol,
+                exchange,
+                timeframe,
+                candle.started_at.isoformat(),
+                candle.open,
+                candle.high,
+                candle.low,
+                candle.close,
+                "dhan",
+                collected_at.isoformat(),
+                candle.open_interest,
+                None,
+            )
+            for candle in candles
+        ]
+        with self.connect() as con:
+            before = con.total_changes
+            con.executemany(
+                """INSERT OR IGNORE INTO market_candles(
+                       instrument_token, symbol, exchange_name, timeframe, started_at,
+                       open, high, low, close, source, collected_at, open_interest,
+                       derived_from_timeframe
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+            return con.total_changes - before
+
+    def has_dhan_candles(self, token: str, start: date, end: date, timeframe: str) -> bool:
+        """Whether any Dhan-sourced candle already exists for a token/timeframe in [start, end].
+
+        Mirrors ``has_upstox_candles`` -- lets a resumed/chunked Dhan backfill
+        skip a range already archived instead of re-fetching it.
+        """
+        with self.connect() as con:
+            row = con.execute(
+                """SELECT 1 FROM market_candles
+                   WHERE instrument_token=? AND source='dhan' AND timeframe=?
+                     AND date(started_at)>=? AND date(started_at)<=? LIMIT 1""",
+                (token, timeframe, start.isoformat(), end.isoformat()),
+            ).fetchone()
+        return row is not None
+
     def save_instruments(self, instruments: list[Instrument], observed_at: datetime) -> int:
         rows = [
             (
@@ -347,7 +409,18 @@ class MarketArchive:
                 (observed_at.isoformat(), status, candles, instruments, details),
             )
 
-    def stats(self) -> ArchiveStats:
+    def stats(self, *, skip_integrity_check: bool = False) -> ArchiveStats:
+        """Summarize the archive.
+
+        ``skip_integrity_check`` skips the ``PRAGMA quick_check`` pass (a
+        full page-by-page scan) and reports ``"skipped"`` instead. Added
+        2026-08-24: the live dashboard's ``_refresh_archive_snapshot`` calls
+        ``stats()`` every ~15 seconds, and after the DhanHQ backfill grew the
+        archive from ~500K to 16M+ rows, running a full quick_check on that
+        cadence made the dashboard take minutes to even start responding.
+        Callers that want a real integrity verification (rather than a live
+        polling snapshot) should call ``integrity_check()`` directly instead.
+        """
         with self.connect() as con:
             candle = con.execute(
                 "SELECT COUNT(*), MIN(started_at), MAX(started_at) FROM market_candles"
@@ -378,7 +451,7 @@ class MarketArchive:
             newest_candle_at=candle[2],
             database_bytes=self.path.stat().st_size if self.path.exists() else 0,
             missing_five_minute_buckets=missing,
-            integrity_status=self.integrity_check(),
+            integrity_status="skipped" if skip_integrity_check else self.integrity_check(),
         )
 
     def integrity_check(self) -> str:

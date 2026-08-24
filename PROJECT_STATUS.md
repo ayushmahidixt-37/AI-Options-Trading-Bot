@@ -4,8 +4,27 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-23
-**2026-08-23 (latest) — two things done: tighter short-strangle stop/target tested (doesn't help), and the paper
+**Last updated:** 2026-08-24
+**2026-08-24 (latest) — DhanHQ historical backfill (Aug 2020-Oct 2024), a real credentials/dashboard-performance
+bug fix, Candidate B wired into live paper trading, and Candidate B CONFIRMED on the fresh data.** Backfilled
+~4 years of previously-unavailable NIFTY underlying + option data via DhanHQ (reconstructed from their
+ATM-relative rolling feed, validated against real overlapping Upstox data before trusting it — see
+`dhan_ingest.py`'s module docstring), extending the archive from ~19 months to ~6 years. Found and fixed a real
+bug along the way: the new `DHAN_*` credential names weren't in `credentials.py`'s strict allowlist, which was
+silently breaking Angel One connectivity too (the loader raises on the first unknown name, discarding everything
+already parsed) — not just a Dhan-specific issue. Also found the dashboard was re-scanning the whole 6+ GB archive
+(including a full `PRAGMA quick_check`) on every ~15s monitor tick and every page load; both are now cached/deferred
+appropriately, with explicit user-triggered actions (the "Verify database" button, CSV export) still running a
+real check. Wired Candidate B (`TrendConfirmedMomentumStrategy` + its proven exit/entry-filter shell) into live
+paper trading, replacing the plain, unfiltered baseline strategy that had been live this whole time — added a
+genuine profit-target exit (previously stop-only, no target at all), the proven premium/OI entry filters, and
+caught a real math bug where naively re-deriving the stop budget from a raised risk cap would have had every
+Candidate B trade rejected by the risk engine (fixed with a fixed, proven rupee budget instead — see
+`connections.py`'s `CANDIDATE_B_*` constants). Then confirmed Candidate B on the fresh 2020-2024 data — unchanged
+parameters, 17 quarters, 15/17 profitable, +593,543.75 net P&L, holding up through the entire 2022 bear market.
+See `BACKTEST_FINDINGS.md`'s final 2026-08-24 entry for the full table and caveats.
+
+**2026-08-23 — two things done: tighter short-strangle stop/target tested (doesn't help), and the paper
 dashboard is live for the first time.** Swept tighter stop/target settings against the strangle's already-adopted
 selective config — validation was completely unchanged across every setting (same 2 trades, same P&L, never once
 tripped differently), development got flat-to-worse. Not adopted; entry selectivity remains the real lever for
