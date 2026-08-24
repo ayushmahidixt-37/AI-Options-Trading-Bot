@@ -91,6 +91,7 @@ class DhanRollingPoint:
     close: float
     volume: float | None
     open_interest: float | None
+    implied_volatility: float | None = None
 
 
 @dataclass(frozen=True)
@@ -132,7 +133,7 @@ class DhanClient:
             "expiryCode": ONLY_WORKING_EXPIRY_CODE,
             "strike": strike_label,
             "drvOptionType": option_type,
-            "requiredData": ["open", "high", "low", "close", "volume", "oi", "timestamp", "strike"],
+            "requiredData": ["open", "high", "low", "close", "volume", "oi", "iv", "timestamp", "strike"],
             "fromDate": from_date.isoformat(),
             "toDate": to_date.isoformat(),
         }
@@ -165,6 +166,7 @@ class DhanClient:
         lows = side.get("low") or [None] * n
         volumes = side.get("volume") or [None] * n
         ois = side.get("oi") or [None] * n
+        ivs = side.get("iv") or [None] * n
         try:
             return [
                 DhanRollingPoint(
@@ -176,9 +178,10 @@ class DhanClient:
                     close=float(c),
                     volume=float(v) if v is not None else None,
                     open_interest=float(oi) if oi is not None else None,
+                    implied_volatility=float(iv) if iv is not None else None,
                 )
-                for t, s, o, h, l, c, v, oi in zip(
-                    side["timestamp"], side["strike"], side["open"], highs, lows, side["close"], volumes, ois
+                for t, s, o, h, l, c, v, oi, iv in zip(
+                    side["timestamp"], side["strike"], side["open"], highs, lows, side["close"], volumes, ois, ivs
                 )
             ]
         except (TypeError, ValueError, KeyError) as exc:

@@ -512,3 +512,98 @@ def resample_dhan_options_to_five_minute(
         if on_progress:
             on_progress(index + 1, len(tokens))
     return len(tokens), candles_saved
+
+
+def backfill_iv_for_weekly_cycle(
+    client: DhanClient,
+    archive: MarketArchive,
+    cycle_start: date,
+    cycle_end: date,
+    *,
+    sleeper: Callable[[float], None] = sleep,
+    max_workers: int = DEFAULT_MAX_WORKERS,
+) -> tuple[int, list[str]]:
+    """Re-fetch one weekly cycle's ATM-10..ATM+10 CE/PE band and backfill
+    implied_volatility onto the already-archived ONE_MINUTE rows (added to
+    DhanClient.fetch_rolling_option's requiredData after the original
+    backfill had already run, so it was never captured the first time --
+    see backfill_implied_volatility's docstring). Does not insert any new
+    candles. Returns (rows_updated, warnings).
+    """
+    warnings: list[str] = []
+    # option_type -> strike -> list of (started_at, iv)
+    by_side: dict[str, dict[float, list[tuple[datetime, float]]]] = {"CE": {}, "PE": {}}
+
+    requests = [
+        ("ATM" if offset == 0 else f"ATM{offset:+d}", drv_type, side_key)
+        for offset in STRIKE_OFFSETS
+        for drv_type, side_key in OPTION_TYPES
+    ]
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(
+                _fetch_with_retry, client, strike_label=label, option_type=drv_type,
+                from_date=cycle_start, to_date=cycle_end, sleeper=sleeper,
+            ): (label, drv_type, side_key)
+            for label, drv_type, side_key in requests
+        }
+        for future in as_completed(futures):
+            label, drv_type, side_key = futures[future]
+            try:
+                points = future.result()
+            except DhanDataError as exc:
+                warnings.append(f"{label}/{drv_type} {cycle_start}..{cycle_end}: {exc}")
+                continue
+            for point in points:
+                if point.implied_volatility is not None:
+                    by_side[side_key].setdefault(point.strike, []).append(
+                        (point.started_at, point.implied_volatility)
+                    )
+
+    updated = 0
+    expiry = weekly_expiry_cycles(cycle_start, cycle_end)
+    # cycle_start..cycle_end is itself exactly one cycle, so this list has one element.
+    resolved_expiry = expiry[0][2] if expiry else cycle_end
+    for side_key, strikes in by_side.items():
+        for strike, points in strikes.items():
+            token = f"DHAN|NIFTY|{resolved_expiry.isoformat()}|{strike:g}|{side_key}"
+            updated += archive.backfill_implied_volatility(token, TIMEFRAME, points)
+    return updated, warnings
+
+
+def resample_dhan_iv_to_five_minute(archive: MarketArchive) -> int:
+    """Propagate implied_volatility (last value per bucket) from the
+    ONE_MINUTE rows onto the already-resampled FIVE_MINUTE rows -- mirrors
+    how open interest is carried through in resample_dhan_options_to_five_minute,
+    done as a separate pass here since IV is backfilled after resampling
+    already happened once.
+    """
+    with archive.connect() as con:
+        tokens = [
+            row[0] for row in con.execute(
+                """SELECT DISTINCT instrument_token FROM market_candles
+                   WHERE source='dhan' AND timeframe='FIVE_MINUTE' AND instrument_token LIKE 'DHAN|NIFTY|%'"""
+            )
+        ]
+    updated = 0
+    for token in tokens:
+        with archive.connect() as con:
+            one_min_rows = con.execute(
+                """SELECT started_at, implied_volatility FROM market_candles
+                   WHERE instrument_token=? AND source='dhan' AND timeframe='ONE_MINUTE'
+                     AND implied_volatility IS NOT NULL
+                   ORDER BY started_at""",
+                (token,),
+            ).fetchall()
+        if not one_min_rows:
+            continue
+        last_iv_by_bucket: dict[datetime, float] = {}
+        for started_at_str, iv in one_min_rows:
+            ts = datetime.fromisoformat(started_at_str)
+            if _within_session(ts):
+                last_iv_by_bucket[_bucket_start(ts, 5)] = float(iv)
+        if not last_iv_by_bucket:
+            continue
+        updates = list(last_iv_by_bucket.items())
+        updated += archive.backfill_implied_volatility(token, RESAMPLE_TARGET_TIMEFRAME, updates)
+    return updated

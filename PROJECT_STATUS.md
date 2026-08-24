@@ -4,8 +4,23 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-24
-**2026-08-24 (latest) — DhanHQ historical backfill (Aug 2020-Oct 2024), a real credentials/dashboard-performance
+**Last updated:** 2026-08-25
+**2026-08-25 (latest) — a fine-tuning pass on Candidate B, both items resolved "no change needed."**
+A single-year parameter re-sweep (24 combinations of indicator periods) found the current live
+config already sits at a local optimum -- nothing beat it. A DhanHQ implied-volatility entry
+filter looked like a genuine capital-efficiency win in screening (band 10-20% IV: +9.53%/+4.54%
+ROI vs baseline across two splits) but **failed a fresh, never-touched 18-month confirmation
+test** (3.27%/3.95% vs baseline's 4.02%) -- rejected, exactly the failure mode this project's
+discipline exists to catch. Along the way: backfilled real historical IV onto the entire
+2020-2024 archive (16.2M values, zero warnings) via a new additive UPDATE-based path, plus a
+second fresh Dhan backfill for 2025-03..2026-08 (5.7M candles, zero failures) specifically to
+get a genuinely held-out test range. Found and fixed a real bug in the backtest engine along the
+way: reading Dhan-reconstructed and real-Upstox option data for the same strike/expiry
+simultaneously creates an arbitrary SQL tie-break; `run_upstox_backtest` now has a scoped
+`dhan_only` mode that fixes this without affecting the (shared-token) underlying series. See
+`BACKTEST_FINDINGS.md`'s final 2026-08-25 entry for the full tables.
+
+**2026-08-24 — DhanHQ historical backfill (Aug 2020-Oct 2024), a real credentials/dashboard-performance
 bug fix, Candidate B wired into live paper trading, and Candidate B CONFIRMED on the fresh data.** Backfilled
 ~4 years of previously-unavailable NIFTY underlying + option data via DhanHQ (reconstructed from their
 ATM-relative rolling feed, validated against real overlapping Upstox data before trusting it — see

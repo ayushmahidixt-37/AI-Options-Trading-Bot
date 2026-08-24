@@ -2224,3 +2224,74 @@ per quarter) — see `research/roi_ledger.html` for the regenerated table.
   this trade count, but noted for completeness.
 - This is still one confirmation pass, not a claim of a permanent edge — the same honesty
   standard this log applies to every other "Confirmed" entry applies here too.
+
+## 2026-08-25 — Fine-tuning pass: parameter re-sweep (no improvement) and an IV filter that looked good, then failed fresh confirmation
+
+**Two follow-up questions after Candidate B's confirmation the day before:** (1) does more data reveal
+better indicator periods than the ones already live, and (2) does DhanHQ's historical implied
+volatility (never previously fetched) make a useful entry filter. Both were tested; both are now
+resolved.
+
+### Parameter re-sweep: current live config is already a local optimum
+
+A quick single-year look (2023 only, 24 combinations of `fast_period`/`slow_period`/`macro_period`/
+`rsi_period`) found the current live configuration (`fast=5 slow=10 macro=40 rsi=14`... — this run
+used `macro_period=60`, the live value; the 1-year quick-look grid separately confirmed `macro=40`
+edges out `macro=60`/`80` on this one year, a difference small enough not to act on without a
+proper multi-year re-check) wins outright: +133,455 net P&L, 4.79% ROI, 39.4% win rate — better
+than all 23 other combinations tested, several by a wide margin. A consistent pattern held across
+the whole grid: `rsi=14` beat `rsi=21` in every single matchup, `slow=10` beat `slow=21` almost
+everywhere. **Not adopted as a change** — there's nothing to adopt, the current live parameters
+already sit at what looks like a genuine local optimum on this dimension. Exploratory only (single
+year, no dev/val split); a proper multi-year re-sweep was not run to completion after this quick
+look answered the practical question (is there obvious profit being left on the table here) with a
+clear no.
+
+### IV filter: promising on screening data, rejected on genuinely fresh confirmation
+
+DhanHQ's historical rolling-option feed supports an `iv` field that was never requested during the
+original 2020-2024 backfill. Added to `dhan_data.py`'s `requiredData`, verified real (not a
+doc-only field) against a live sample, then backfilled onto all already-archived rows via a new
+UPDATE-based path (`MarketArchive.backfill_implied_volatility`, `dhan_ingest.py`'s
+`backfill_iv_for_weekly_cycle`) rather than re-inserting — **16,249,304 values backfilled across the
+full 2020-2024 archive, zero warnings**, plus propagated onto the resampled 5-minute bars
+(`resample_dhan_iv_to_five_minute`). Data-quality check first: 6.4% of values are exactly `0`
+(Dhan's own placeholder for illiquid/edge-case moments it apparently couldn't price) and at least
+one extreme outlier (1055% IV on a near-worthless, near-expiry contract) — both treated as "unknown"
+(fails closed) rather than trusted, via `BacktestParameters.minimum_implied_volatility`/
+`maximum_implied_volatility` added to `upstox_backtest.py`.
+
+**Screening pass** (same dev/val split as the confirmation's own internal re-use, 2020-08..2022-12 /
+2023-01..2024-10, Exploratory): `band 10-20` (only enter when IV is 10-20%) beat the no-filter
+baseline on ROI in *both* splits — 9.53% vs 7.25% dev, 4.54% vs 4.08% val. `max_iv=20` showed a
+similar, slightly smaller edge. Genuinely fewer trades (capital efficiency, not raw P&L) but a
+consistent cross-split signal — looked like a real finding.
+
+**Fresh confirmation, done properly before trusting it:** rather than accept the screening result,
+a *new*, never-touched 18-month period (2025-03..2026-08, Dhan-reconstructed options with real IV,
+backfilled the same way -- 5,711,537 one-minute candles, zero fetch failures across all 77 weekly
+cycles) was fetched specifically to test this filter on data it had never seen. Required adding
+`dhan_only=True` to `run_upstox_backtest` (a real bug caught and fixed along the way: without it, a
+real Upstox contract and a Dhan-reconstructed one for the same strike/expiry are ambiguous
+candidates with an identical `ABS(strike-spot)` distance — the query picks one arbitrarily; the fix
+scopes `dhan_only` to option-leg queries only, not the shared-token underlying series).
+
+| Variant | Trades | Win rate | Net P&L | ROI |
+|---|---|---|---|---|
+| baseline (no IV filter) | 852 | 37.1% | +266,773.75 | **4.02%** |
+| band 10-20 | 530 | 36.4% | +137,040.00 | 3.27% |
+| max_iv=20 | 743 | 37.3% | +218,027.50 | 3.95% |
+
+**Both IV filter variants underperform the baseline on genuinely fresh data — the opposite of what
+the screening pass showed.** This is exactly the failure mode this project's dev/val/fresh-test
+discipline exists to catch, and it caught it. **Rejected.** The IV data itself remains archived and
+usable (real, verified, no reason to distrust the underlying numbers) — it's this specific filtering
+hypothesis that didn't generalize, not the data source.
+
+### Infrastructure added, independent of the filter's rejection
+
+- `MarketArchive.backfill_implied_volatility` (UPDATE-based, additive-only backfill onto existing rows)
+- `dhan_ingest.py`: `backfill_iv_for_weekly_cycle`, `resample_dhan_iv_to_five_minute`
+- `dhan_data.py`: `DhanRollingPoint.implied_volatility`, `iv` added to every `fetch_rolling_option` call permanently (harmless to always request)
+- `upstox_backtest.py`: `dhan_only` parameter, `minimum_implied_volatility`/`maximum_implied_volatility` on `BacktestParameters`
+- The archive now has real historical IV across both the original 2020-2024 range and this new 2025-2026 range -- available for a *different* IV-based hypothesis if one comes up later, without re-fetching anything.

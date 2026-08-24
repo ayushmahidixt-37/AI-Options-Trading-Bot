@@ -58,6 +58,20 @@ params = BacktestParameters(
   a process violation) -- see the `CANDIDATE_B_*` constants near the top of
   `connections.py`. Full detail: grep `BACKTEST_FINDINGS.md` for
   `## 2026-08-24 — Candidate B confirmed on fresh 2020-2024 data`.
+- **2026-08-25 fine-tuning pass, both items resolved with a "no change" answer.**
+  A parameter re-sweep (1-year quick look, 24 combinations) found the current
+  live indicator periods already sit at a local optimum -- nothing tested beat
+  them. A DhanHQ implied-volatility filter (`band 10-20`: only enter when IV
+  is 10-20%) looked like a real, cross-validated capital-efficiency win on
+  screening data (+9.53%/+4.54% ROI vs baseline's +7.25%/+4.08% across two
+  splits) -- then **failed a genuinely fresh 18-month confirmation test**
+  (2025-03..2026-08, never touched before): both IV filter variants
+  underperformed the no-filter baseline (3.27%/3.95% ROI vs baseline's
+  4.02%). **Rejected** -- exactly the failure mode this project's
+  fresh-data-confirmation discipline exists to catch. The IV data itself
+  (16.2M+ backfilled values, zero warnings) remains archived and usable for
+  a different hypothesis later. Full detail: grep `BACKTEST_FINDINGS.md` for
+  `## 2026-08-25 — Fine-tuning pass`.
 
 Full detail: grep `BACKTEST_FINDINGS.md` for `## 2026-08-22 — Trend-confirmed momentum`
 (3 entries: parameter sweep, round 2 entry+exit sweep, per-trade loss post-mortem),

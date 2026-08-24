@@ -159,6 +159,7 @@ class MarketArchive:
             )
             self._ensure_column(con, "market_candles", "open_interest", "REAL")
             self._ensure_column(con, "market_candles", "derived_from_timeframe", "TEXT")
+            self._ensure_column(con, "market_candles", "implied_volatility", "REAL")
             self._ensure_column(con, "range_usage", "params_fingerprint", "TEXT")
 
     @staticmethod
@@ -325,6 +326,28 @@ class MarketArchive:
                        open, high, low, close, source, collected_at, open_interest,
                        derived_from_timeframe
                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                rows,
+            )
+            return con.total_changes - before
+
+    def backfill_implied_volatility(
+        self, token: str, timeframe: str, updates: list[tuple[datetime, float]]
+    ) -> int:
+        """Set ``implied_volatility`` on already-archived rows, matched by timestamp.
+
+        Added 2026-08-24: the original DhanHQ backfill didn't request IV
+        (only open/high/low/close/volume/oi) -- this fills it in on the
+        existing rows afterward rather than re-inserting them, since the
+        OHLC/OI data is already correct and doesn't need touching. A no-op
+        for any timestamp that isn't already an archived row (this never
+        creates new candles, only annotates existing ones).
+        """
+        rows = [(iv, token, timeframe, started_at.isoformat()) for started_at, iv in updates]
+        with self.connect() as con:
+            before = con.total_changes
+            con.executemany(
+                """UPDATE market_candles SET implied_volatility=?
+                   WHERE instrument_token=? AND timeframe=? AND started_at=?""",
                 rows,
             )
             return con.total_changes - before
