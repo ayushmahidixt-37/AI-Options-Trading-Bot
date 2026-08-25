@@ -148,6 +148,8 @@ def run_short_strangle_backtest(
     underlying_key: str = NIFTY_UNDERLYING_KEY,
     timeframe: str = "FIVE_MINUTE",
     include_derived: bool = False,
+    include_dhan: bool = False,
+    dhan_only: bool = False,
 ) -> ShortPremiumResult:
     """Replay a daily short-strangle over archived Upstox candles.
 
@@ -156,11 +158,21 @@ def run_short_strangle_backtest(
     data at matching timestamps to be walked forward together -- a
     timestamp only one leg has data for is skipped (fail-closed, not an
     approximation of the missing leg's price).
+
+    ``include_dhan``/``dhan_only`` mirror ``run_upstox_backtest``'s
+    parameters of the same name -- see that function's docstring for the
+    full rationale (added 2026-08-25 to extend this engine to the same
+    2020-2024 DhanHQ-backed range Candidate B and ORB were confirmed
+    against). ``dhan_only`` scopes to the option legs only; the underlying
+    query is unaffected since it's stored under one shared token regardless
+    of source.
     """
     variant = parameters or ShortStrangleParameters()
     derived_filter = "" if include_derived else " AND derived_from_timeframe IS NULL"
+    source_clause = "source IN ('upstox','dhan')" if include_dhan else "source='upstox'"
+    option_source_clause = "source='dhan'" if dhan_only else source_clause
     with archive.connect() as con:
-        clauses = ["instrument_token=?", "source='upstox'", "timeframe=?"]
+        clauses = ["instrument_token=?", source_clause, "timeframe=?"]
         sql_parameters: list[object] = [underlying_key, timeframe]
         if not include_derived:
             clauses.append("derived_from_timeframe IS NULL")
@@ -192,7 +204,7 @@ def run_short_strangle_backtest(
         con.execute(
             f"""CREATE TEMP TABLE available_upstox_tokens AS
                 SELECT DISTINCT instrument_token FROM market_candles
-                WHERE source='upstox'{derived_filter}"""
+                WHERE {option_source_clause}{derived_filter}"""
         )
         con.execute(
             "CREATE INDEX temp.available_upstox_tokens_idx ON available_upstox_tokens(instrument_token)"
@@ -252,7 +264,7 @@ def run_short_strangle_backtest(
             call_rows = {
                 r[0]: float(r[1]) for r in con.execute(
                     f"""SELECT started_at, close FROM market_candles
-                       WHERE instrument_token=? AND source='upstox' AND timeframe=?{derived_filter}
+                       WHERE instrument_token=? AND {option_source_clause} AND timeframe=?{derived_filter}
                          AND started_at>=? AND started_at<=? ORDER BY started_at""",
                     (call_contract[0], timeframe, entry_at.isoformat(), session_exit),
                 ).fetchall()
@@ -260,7 +272,7 @@ def run_short_strangle_backtest(
             put_rows = {
                 r[0]: float(r[1]) for r in con.execute(
                     f"""SELECT started_at, close FROM market_candles
-                       WHERE instrument_token=? AND source='upstox' AND timeframe=?{derived_filter}
+                       WHERE instrument_token=? AND {option_source_clause} AND timeframe=?{derived_filter}
                          AND started_at>=? AND started_at<=? ORDER BY started_at""",
                     (put_contract[0], timeframe, entry_at.isoformat(), session_exit),
                 ).fetchall()

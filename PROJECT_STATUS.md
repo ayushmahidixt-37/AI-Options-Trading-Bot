@@ -5,7 +5,26 @@
 > priorities, operating instructions, or known limitations change.
 
 **Last updated:** 2026-08-25
-**2026-08-25 (latest, later) — ORB downgraded to Rejected on fresh data, and the dashboard now
+**2026-08-25 (latest) — short strangle re-confirmed on fresh data, a real (not assumed) combined-portfolio
+check with Candidate B, `MAX_OPEN_POSITIONS` raised 2→5, and live (paper-only) short-strangle execution
+built and tested.** The short strangle held up on the same fresh 2020-2024 range that downgraded ORB: 12/17
+quarters profitable, +67,980 net P&L. Run together with Candidate B directly from both engines' trade-level
+P&L (the user asked explicitly whether this had actually been tested combined or just assumed) -- daily P&L
+correlation -0.36, combined max drawdown 14,540 vs Candidate B's own 13,455 alone (naive sum of both would
+have been 39,850). This is the first genuinely-tested two-way combination in the project and supersedes the
+now-flagged three-way numbers that depended on the since-rejected ORB. `MAX_OPEN_POSITIONS` raised from 2 to
+5 in `local-bot.env` to make room for a strangle (2 slots/trade) alongside Candidate B. Built and tested the
+same day: `connections.py::create_short_strangle_proposal` (entry gate, opening-range filter, OTM leg
+selection matching the backtest's exact query), `paper_monitor.py`'s daily once-per-day auto-entry (with
+automatic call-leg rollback if the put leg fails to open -- never leaves a naked single leg) and paired exit
+monitoring (evaluates both legs' combined buy-back cost together, matching how the strategy was actually
+backtested, never either leg alone), plus a separate "ENABLE/DISABLE AUTO STRANGLE" dashboard toggle
+independent of Candidate B's. Foundation layer (SELL-side schema migration, direction-aware fill/P&L/risk
+math) was tested against a copy of the real production database first. Full suite: 284 passed, same 4
+pre-existing unrelated failures. `LIVE_TRADING_ENABLED` remains `false` throughout -- paper-only. See
+`BACKTEST_FINDINGS.md`'s 2026-08-25 "Short strangle re-confirmed..." entry for the full numbers.
+
+**2026-08-25 (earlier) — ORB downgraded to Rejected on fresh data, and the dashboard now
 starts itself automatically on trading days.** ORB was run through the identical 17-quarter
 fresh-2020-2024-data check that confirmed candidate B: only 10/17 quarters profitable, +0.82%
 blended ROI vs candidate B's +5.98% on the same range -- does not reproduce the "profitable in

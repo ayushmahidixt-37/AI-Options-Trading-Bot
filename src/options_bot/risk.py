@@ -31,15 +31,27 @@ class RiskEngine:
             raise RiskRejected("Quote is stale or timestamped in the future")
         if request.lots > self.settings.max_lots_per_trade:
             raise RiskRejected("Lot limit exceeded")
-        if request.stop_price <= 0 or request.stop_price >= request.quote.price:
-            raise RiskRejected("Long-option stop must be positive and below entry")
+        is_sell = request.side == "SELL"
+        if request.stop_price <= 0:
+            raise RiskRejected("Stop must be positive")
+        if is_sell and request.stop_price <= request.quote.price:
+            raise RiskRejected("Short-option stop must be above entry")
+        if not is_sell and request.stop_price >= request.quote.price:
+            raise RiskRejected("Long-option stop must be below entry")
         expected_fill = request.quote.price * (
-            1 + self.settings.paper_slippage_bps / 10_000
+            1 - self.settings.paper_slippage_bps / 10_000
+            if is_sell
+            else 1 + self.settings.paper_slippage_bps / 10_000
         )
+        # loss_at_stop already accounts for direction via PaperOrderRequest's
+        # own side-aware risk_at_stop -- recomputed here against the
+        # *expected* (slippage-adjusted) fill rather than the raw quote,
+        # matching the original BUY-only formula's intent.
         loss_at_stop = (
-            (expected_fill - request.stop_price) * request.units
-            + 2 * self.settings.paper_fee_per_order
-        )
+            (request.stop_price - expected_fill) * request.units
+            if is_sell
+            else (expected_fill - request.stop_price) * request.units
+        ) + 2 * self.settings.paper_fee_per_order
         if loss_at_stop > self.settings.max_loss_per_trade:
             raise RiskRejected("Maximum loss per trade exceeded")
         positions = self.ledger.open_positions()
@@ -59,12 +71,27 @@ class RiskEngine:
             and self.ledger.realized_pnl_on(trading_date) <= -self.settings.max_daily_net_loss
         ):
             raise RiskRejected("Daily loss circuit breaker is latched")
-        used = sum(
-            float(row["entry_fill_price"]) * int(row["units"])
-            + float(row["entry_fee"])
-            for row in positions
+        # Capital "used" by each open position: a BUY commits the premium
+        # paid; a SELL (short) doesn't pay any premium upfront (it receives
+        # one), but real exchange margin for holding a naked short is
+        # several times the premium and isn't modeled here (see
+        # short_premium_backtest.py's docstring) -- treating its own
+        # max-loss-at-stop as the capital commitment is a deliberately
+        # conservative stand-in for margin, so the paper account can never
+        # "use" more capital than it could actually lose.
+        def position_capital(row: object) -> float:
+            if row["side"] == "SELL":
+                stop = float(row["stop_price"])
+                entry = float(row["entry_fill_price"])
+                return max(0.0, stop - entry) * int(row["units"]) + float(row["entry_fee"])
+            return float(row["entry_fill_price"]) * int(row["units"]) + float(row["entry_fee"])
+
+        used = sum(position_capital(row) for row in positions)
+        required = (
+            loss_at_stop
+            if is_sell
+            else expected_fill * request.units + self.settings.paper_fee_per_order
         )
-        required = expected_fill * request.units + self.settings.paper_fee_per_order
         available = float(account["starting_capital"]) + float(account["realized_pnl"]) - used
         if required > available:
             raise RiskRejected("Insufficient paper capital")

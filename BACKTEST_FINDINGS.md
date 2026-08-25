@@ -2335,3 +2335,56 @@ screening range was real but short (under 2 years) and evidently not representat
 signal behaves across a full market cycle -- exactly the risk fresh-data confirmation exists to
 catch. **Not added to any live/combined portfolio.** The 2020-2024 archive itself (already backfilled
 for Candidate B) required no additional data work for this check.
+
+## 2026-08-25 — Short strangle re-confirmed on the 2020-2024 fresh range; combined-portfolio check with Candidate B run for real
+
+**Direct follow-up, same methodology as ORB above.** The selective short strangle (`strike_distance_pct=0.002,
+stop_multiple=2.0, target_fraction=0.5`, opening-range filtered, `exclude_expiry_day=True`) was run across the
+same 17 quarters of the 2020-2024 DhanHQ backfill. Unlike ORB, it held up: **12 of 17 quarters profitable, net
+P&L +67,980** across the full span. (Aggregate result only -- the quarter-by-quarter table from this run was
+reported in chat but not preserved as a file; it should be regenerated and pasted in here before this entry is
+cited as the sole record. Do not treat the two summary numbers above as a substitute for the full table other
+strategies in this log carry.)
+
+**Combined-portfolio check, done for real rather than assumed:** the user asked explicitly whether the short
+strangle had been tested together with Candidate B or only alone, and whether ORB's near-zero correlation
+findings (see the "Extended to three" note in `research/INDEX.md`) still applied now that ORB itself is
+rejected. Rather than reuse the old three-way numbers, a fresh two-way check was run directly from both
+engines' `trade_details` over the full 2020-08-03..2024-10-01 range: per-day P&L was aggregated for each
+strategy independently, a true combined daily P&L series was built by summing the two, and max drawdown was
+computed on that combined series (not a naive sum of each strategy's own drawdown).
+
+| | Candidate B alone | Short strangle alone | Combined |
+|---|---|---|---|
+| Trades | 2,388 | 526 | 2,914 |
+| Net P&L | +608,962.50 | +67,980.00 | +676,942.50 |
+| Max drawdown (daily-aggregated) | 13,455 | 26,395 | **14,540** (vs 39,850 naive sum) |
+| P&L / drawdown ratio | 45.26 | 2.58 | **46.56** |
+
+**Daily P&L correlation between the two strategies: -0.36** (negative -- they tend to do well on different
+days, not the same days). 433 of the ~850+ trading days in the range had both strategies trading
+simultaneously. Combining barely moves drawdown above Candidate B's alone (14,540 vs 13,455) despite adding
+the strangle's full profit and its own much larger standalone drawdown (26,395) -- the negative correlation is
+doing real diversification work here, not just failing to hurt.
+
+**This is the first genuinely tested two-way combination in this project** (as opposed to assumed from each
+strategy's standalone numbers) and is the basis for building live short-strangle execution. `MAX_OPEN_POSITIONS`
+was raised from 2 to 5 in `local-bot.env` to make room for it (Candidate B up to ~2 positions, a strangle
+needing 2 slots per trade, plus headroom).
+
+**Live (paper-only) execution built and tested same day** -- `connections.py` gained
+`create_short_strangle_proposal` (entry gate: 9:45 earliest, opening-range filter, nearest-expiry OTM
+call/put selection mirroring `short_premium_backtest.py`'s exact query, expiry-day exclusion) and
+`market_archive.py` gained `select_strangle_legs`. `paper_monitor.py` gained a daily, once-per-day auto-entry
+(`_maybe_auto_short_strangle_entry`, with automatic rollback of the call leg if the put leg's open fails, so a
+naked single leg can never be left open) and paired exit monitoring (`_check_strangle_exits`, which evaluates
+both legs' combined buy-back cost together -- never either leg alone -- against `stop_multiple`/
+`target_fraction`, matching how the backtest actually defines the exit). A separate "ENABLE/DISABLE AUTO
+STRANGLE" toggle was added (dashboard + `/actions/auto-strangle`), independent of Candidate B's own toggle, so
+the newer strategy can be switched on deliberately rather than inheriting Candidate B's already-running state.
+Foundation layer (schema migration for SELL-side orders, direction-aware fill/P&L/risk math) was tested against
+a copy of the real production database before any of this was built on top of it. 7 new tests in
+`tests/test_short_strangle_live.py` plus 1 in `tests/test_web.py`; full suite 284 passed (same 4 pre-existing,
+unrelated failures as before -- 2 `fcntl`-only-on-Linux in `test_service.py`, one in `test_market_archive.py`,
+one in `test_readiness.py`). `LIVE_TRADING_ENABLED` remains `false`; nothing above changed that boundary --
+this is all still paper-only.

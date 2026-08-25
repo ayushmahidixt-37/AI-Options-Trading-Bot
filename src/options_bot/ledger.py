@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class PaperLedger:
@@ -54,7 +54,8 @@ class PaperLedger:
                     exchange_name TEXT NOT NULL,
                     underlying TEXT NOT NULL,
                     option_type TEXT NOT NULL CHECK(option_type IN ('CE','PE')),
-                    side TEXT NOT NULL CHECK(side = 'BUY'),
+                    side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+                    trade_group_id TEXT,
                     lots INTEGER NOT NULL CHECK(lots > 0),
                     lot_size INTEGER NOT NULL CHECK(lot_size > 0),
                     units INTEGER NOT NULL CHECK(units = lots * lot_size),
@@ -108,6 +109,8 @@ class PaperLedger:
                 (SCHEMA_VERSION,),
             )
             self._ensure_column(con, "paper_orders", "target_price", "REAL")
+            self._migrate_side_check_constraint(con)
+            self._ensure_column(con, "paper_orders", "trade_group_id", "TEXT")
 
     @staticmethod
     def _ensure_column(con: sqlite3.Connection, table: str, column: str, sql_type: str) -> None:
@@ -120,6 +123,75 @@ class PaperLedger:
         existing = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
         if column not in existing:
             con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {sql_type}")
+
+    @staticmethod
+    def _migrate_side_check_constraint(con: sqlite3.Connection) -> None:
+        """Relax ``paper_orders.side``'s CHECK from BUY-only to BUY/SELL.
+
+        Added 2026-08-25 for short-strangle live support (selling option
+        legs). SQLite has no ALTER TABLE for CHECK constraints -- an
+        existing table created under the old, stricter constraint needs a
+        real rebuild (new table, copy rows, swap in), done here defensively
+        so any already-recorded real paper trades are preserved, not lost.
+        A no-op (checked via the stored CREATE TABLE SQL) once already
+        migrated, so this is safe to run on every startup.
+        """
+        row = con.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='paper_orders'"
+        ).fetchone()
+        if row is None or "CHECK(side = 'BUY')" not in row[0]:
+            return
+        con.executescript(
+            """
+            PRAGMA foreign_keys=OFF;
+            ALTER TABLE paper_orders RENAME TO paper_orders_pre_sell_migration;
+            CREATE TABLE paper_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_order_id TEXT NOT NULL UNIQUE,
+                trading_date TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                closed_at TEXT,
+                symbol TEXT NOT NULL,
+                token TEXT NOT NULL,
+                exchange_name TEXT NOT NULL,
+                underlying TEXT NOT NULL,
+                option_type TEXT NOT NULL CHECK(option_type IN ('CE','PE')),
+                side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+                trade_group_id TEXT,
+                lots INTEGER NOT NULL CHECK(lots > 0),
+                lot_size INTEGER NOT NULL CHECK(lot_size > 0),
+                units INTEGER NOT NULL CHECK(units = lots * lot_size),
+                requested_price REAL NOT NULL,
+                entry_fill_price REAL NOT NULL,
+                exit_fill_price REAL,
+                stop_price REAL NOT NULL,
+                target_price REAL,
+                entry_fee REAL NOT NULL,
+                exit_fee REAL NOT NULL DEFAULT 0,
+                realized_pnl REAL,
+                status TEXT NOT NULL CHECK(status IN ('OPEN','CLOSED')),
+                strategy TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                close_reason TEXT
+            );
+            INSERT INTO paper_orders (
+                id, client_order_id, trading_date, created_at, closed_at, symbol, token,
+                exchange_name, underlying, option_type, side, lots, lot_size, units,
+                requested_price, entry_fill_price, exit_fill_price, stop_price, target_price,
+                entry_fee, exit_fee, realized_pnl, status, strategy, reason, close_reason
+            )
+            SELECT
+                id, client_order_id, trading_date, created_at, closed_at, symbol, token,
+                exchange_name, underlying, option_type, side, lots, lot_size, units,
+                requested_price, entry_fill_price, exit_fill_price, stop_price, target_price,
+                entry_fee, exit_fee, realized_pnl, status, strategy, reason, close_reason
+            FROM paper_orders_pre_sell_migration;
+            DROP TABLE paper_orders_pre_sell_migration;
+            CREATE UNIQUE INDEX IF NOT EXISTS one_open_symbol
+                ON paper_orders(symbol) WHERE status='OPEN';
+            PRAGMA foreign_keys=ON;
+            """
+        )
 
     def create_account(self, starting_capital: float) -> None:
         with self.connect() as con:

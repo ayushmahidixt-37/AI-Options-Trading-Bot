@@ -152,10 +152,21 @@ Rejected the same day** (see above) -- only 10/17 quarters profitable and
 +0.82% blended ROI on the fresh 2020-2024 data, a small fraction of
 candidate B's own +5.98% on the identical range. Low correlation with a
 strategy that barely holds its own doesn't provide the diversification
-benefit this section describes; the two-way (candidate B + short
-strangle) and three-way portfolio numbers above have not been re-checked
-on fresh data and should not be trusted as-is until ORB's role in them is
-reconsidered or re-run without it.
+benefit this section describes; the three-way portfolio numbers above
+include ORB and should not be trusted as-is.
+
+**Two-way (candidate B + short strangle) re-checked for real, same day,
+without ORB:** short strangle itself was also re-confirmed on the fresh
+2020-2024 range (12/17 quarters profitable, +67,980 net P&L), then run
+together with candidate B directly from both engines' trade-level P&L
+(not assumed from standalone numbers). Daily P&L correlation: -0.36.
+Combined max drawdown 14,540 vs candidate B's own 13,455 alone (naive sum
+of both drawdowns would have been 39,850) -- barely moves despite adding
+the strangle's full profit. See BACKTEST_FINDINGS.md's 2026-08-25 "Short
+strangle re-confirmed... combined-portfolio check" entry for the full
+numbers. This two-way result is real and trusted; live (paper-only)
+short-strangle execution was built on top of it the same day (separate
+"ENABLE/DISABLE AUTO STRANGLE" toggle, off by default).
 
 ## Data coverage (verify freshness before trusting this)
 

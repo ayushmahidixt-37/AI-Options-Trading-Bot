@@ -131,6 +131,22 @@
         form.requestSubmit();
       });
     });
+    document.querySelectorAll('[data-auto-strangle-toggle]').forEach(toggle => {
+      toggle.addEventListener('change', () => {
+        const form = toggle.form;
+        const enabling = toggle.checked;
+        const prompt = enabling
+          ? 'Enable automatic SHORT-STRANGLE entries? The bot will sell one call and one put once per day, subject to every capacity, risk and time-window check. No live order can be placed.'
+          : 'Disable automatic short-strangle entries? Existing strangle legs will still be monitored for exits.';
+        if (!window.confirm(prompt)) {
+          toggle.checked = !enabling;
+          return;
+        }
+        form.elements.enabled.value = String(enabling);
+        form.elements.confirmation.value = enabling ? 'ENABLE AUTO STRANGLE' : 'DISABLE AUTO STRANGLE';
+        form.requestSubmit();
+      });
+    });
     function refreshDashboard() { location.replace(`/${location.hash}`); }
     window.setTimeout(refreshDashboard, 15000);
   </script>

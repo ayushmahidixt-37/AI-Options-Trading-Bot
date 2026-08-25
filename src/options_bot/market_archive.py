@@ -638,6 +638,55 @@ class MarketArchive:
             for row in rows
         ]
 
+    def select_strangle_legs(
+        self, today: date, spot: float, strike_distance_pct: float
+    ) -> tuple[Instrument, Instrument] | None:
+        """Nearest out-of-the-money call and put for a short strangle.
+
+        Mirrors ``short_premium_backtest.py``'s contract-selection query
+        exactly (nearest strike at/beyond ``spot * (1 +/- strike_distance_pct)``
+        on the nearest expiry >= today) so live selection matches what was
+        actually backtested. Returns ``None`` if either leg is missing or
+        the two legs don't share the same expiry.
+        """
+        if spot <= 0 or strike_distance_pct <= 0:
+            raise ValueError("spot and strike_distance_pct must be positive")
+        with self.connect() as con:
+            call_row = con.execute(
+                """SELECT symbol, token, exchange_name, underlying, option_type,
+                          lot_size, expiry, strike
+                   FROM instruments
+                   WHERE underlying='NIFTY' AND option_type='CE' AND expiry>=date(?)
+                     AND strike>=?
+                   ORDER BY expiry, strike LIMIT 1""",
+                (today.isoformat(), spot * (1 + strike_distance_pct)),
+            ).fetchone()
+            put_row = con.execute(
+                """SELECT symbol, token, exchange_name, underlying, option_type,
+                          lot_size, expiry, strike
+                   FROM instruments
+                   WHERE underlying='NIFTY' AND option_type='PE' AND expiry>=date(?)
+                     AND strike<=?
+                   ORDER BY expiry, strike DESC LIMIT 1""",
+                (today.isoformat(), spot * (1 - strike_distance_pct)),
+            ).fetchone()
+        if call_row is None or put_row is None or call_row[6] != put_row[6]:
+            return None
+
+        def _to_instrument(row: tuple) -> Instrument:
+            return Instrument(
+                symbol=row[0],
+                token=row[1],
+                exchange=row[2],
+                underlying=row[3],
+                option_type=row[4],
+                lot_size=int(row[5]),
+                expiry=date.fromisoformat(row[6]),
+                strike=float(row[7]),
+            )
+
+        return _to_instrument(call_row), _to_instrument(put_row)
+
     def has_upstox_candles(self, token: str, start: date, end: date, timeframe: str) -> bool:
         """Whether any Upstox-sourced candle already exists for a token/timeframe in [start, end].
 

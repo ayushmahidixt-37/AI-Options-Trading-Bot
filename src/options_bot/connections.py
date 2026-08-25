@@ -62,6 +62,46 @@ CANDIDATE_B_TARGET_RETURN = 0.30
 CANDIDATE_B_MINIMUM_OPTION_PREMIUM = 20.0
 CANDIDATE_B_MINIMUM_OPEN_INTEREST = 100_000.0
 
+# Selective short strangle -- confirmed on fresh 2020-2024 data 2026-08-25
+# (12/17 quarters profitable, +67,980 net P&L standalone) and confirmed to
+# combine well with Candidate B (-0.36 daily P&L correlation, combined
+# drawdown barely above Candidate B alone's). Not yet wired into live
+# trading pending this build -- see research/INDEX.md's short-strangle
+# section and BACKTEST_FINDINGS.md's 2026-08-23 selective-deployment entry
+# for the full validation history and exact source of every value below.
+SHORT_STRANGLE_ENTRY_TIME = time(9, 45)
+SHORT_STRANGLE_STRIKE_DISTANCE_PCT = 0.002
+SHORT_STRANGLE_STOP_MULTIPLE = 2.0
+SHORT_STRANGLE_TARGET_FRACTION = 0.5
+SHORT_STRANGLE_MAXIMUM_OPENING_RANGE_PCT = 0.005
+SHORT_STRANGLE_OPENING_RANGE_BARS = 6
+SHORT_STRANGLE_FORCE_EXIT_TIME = time(15, 20)
+# A short option's real max loss is theoretically unbounded (see
+# short_premium_backtest.py's module docstring), so unlike a BUY position
+# there is no live-price-derived stop that naturally caps risk.py's
+# per-leg loss_at_stop check. Like CANDIDATE_B_RISK_BUDGET above, this is
+# a fixed, deliberately conservative capital-budgeting stand-in per leg --
+# NOT the real exit trigger. The real exit trigger is the paired,
+# combined-premium check in paper_monitor.py's _check_strangle_exits
+# (stop_multiple / target_fraction on both legs' summed buy-back cost).
+SHORT_STRANGLE_RISK_BUDGET_PER_LEG = 300.0
+
+
+@dataclass(frozen=True)
+class ShortStrangleLegProposal:
+    instrument: Instrument
+    quote: Quote
+    stop_price: float
+
+
+@dataclass(frozen=True)
+class ShortStrangleProposal:
+    trade_group_id: str
+    call: ShortStrangleLegProposal
+    put: ShortStrangleLegProposal
+    premium_collected: float
+    nifty_spot: float
+
 
 class ConnectionActionError(RuntimeError):
     """Raised with a display-safe message when an external action fails."""
@@ -611,6 +651,92 @@ class ConnectionManager:
             ema_slow=ema_slow,
             rsi_value=rsi_value,
             atr_value=atr_value,
+        )
+
+    def create_short_strangle_proposal(
+        self, observed_at: datetime | None = None
+    ) -> ShortStrangleProposal:
+        """Build a fresh, non-executing two-leg short-strangle proposal.
+
+        Mirrors ``short_premium_backtest.py``'s confirmed selective config
+        exactly (see the SHORT_STRANGLE_* constants above): entry no
+        earlier than 9:45, skip if today's opening range is too wide, sell
+        the nearest OTM call/put 0.2% either side of spot on the nearest
+        expiry, skip that expiry's own expiry day. Per-leg ``stop_price``
+        is a fixed capital-budgeting proxy for risk.py
+        (SHORT_STRANGLE_RISK_BUDGET_PER_LEG) -- the real exit trigger (2x
+        combined premium / 50% combined decay) is evaluated on both legs
+        together by the paired monitor, not per leg; see
+        ShortStrangleParameters' docstring in short_premium_backtest.py.
+        """
+        now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
+            self._settings.timezone
+        )
+        block_reason = self.entry_block_reason(now)
+        if block_reason:
+            raise ConnectionActionError(block_reason)
+        with self._lock:
+            smart_api = self._smart_api
+            spot = self._snapshot.nifty_price
+        if smart_api is None or not spot:
+            raise ConnectionActionError("Connect Angel One and load NIFTY spot first")
+        if now.time() < SHORT_STRANGLE_ENTRY_TIME:
+            raise ConnectionActionError("Too early for the daily short-strangle entry")
+        if now.time() >= SHORT_STRANGLE_FORCE_EXIT_TIME:
+            raise ConnectionActionError("Past today's short-strangle force-exit time")
+
+        today = now.date()
+        with self.archive.connect() as con:
+            opening_rows = con.execute(
+                """SELECT high, low FROM market_candles
+                   WHERE instrument_token=? AND timeframe='FIVE_MINUTE'
+                     AND date(started_at)=?
+                   ORDER BY started_at LIMIT ?""",
+                (NIFTY_TOKEN, today.isoformat(), SHORT_STRANGLE_OPENING_RANGE_BARS),
+            ).fetchall()
+        if len(opening_rows) < SHORT_STRANGLE_OPENING_RANGE_BARS:
+            raise ConnectionActionError("Not enough of today's opening range is archived yet")
+        range_high = max(float(row[0]) for row in opening_rows)
+        range_low = min(float(row[1]) for row in opening_rows)
+        if (
+            range_low <= 0
+            or (range_high - range_low) / range_low > SHORT_STRANGLE_MAXIMUM_OPENING_RANGE_PCT
+        ):
+            raise ConnectionActionError("Today's opening range is too wide for the short strangle")
+
+        legs = self.archive.select_strangle_legs(today, spot, SHORT_STRANGLE_STRIKE_DISTANCE_PCT)
+        if legs is None:
+            raise ConnectionActionError("No matching short-strangle strikes are archived")
+        call_instrument, put_instrument = legs
+        if call_instrument.expiry == today:
+            raise ConnectionActionError("Today is the strangle's own expiry day -- excluded")
+
+        call_quote = self.quote_instrument(call_instrument, now)
+        put_quote = self.quote_instrument(put_instrument, now)
+        call_leg = ShortStrangleLegProposal(
+            instrument=call_instrument,
+            quote=call_quote,
+            stop_price=round(
+                call_quote.price
+                + SHORT_STRANGLE_RISK_BUDGET_PER_LEG / call_instrument.lot_size,
+                2,
+            ),
+        )
+        put_leg = ShortStrangleLegProposal(
+            instrument=put_instrument,
+            quote=put_quote,
+            stop_price=round(
+                put_quote.price
+                + SHORT_STRANGLE_RISK_BUDGET_PER_LEG / put_instrument.lot_size,
+                2,
+            ),
+        )
+        return ShortStrangleProposal(
+            trade_group_id=str(uuid.uuid4()),
+            call=call_leg,
+            put=put_leg,
+            premium_collected=round(call_quote.price + put_quote.price, 2),
+            nifty_spot=spot,
         )
 
     def quote_instrument(

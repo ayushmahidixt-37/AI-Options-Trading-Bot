@@ -872,6 +872,32 @@ def create_web_app(
             context=dashboard_context(request, message, ok),
         )
 
+    @app.post("/actions/auto-strangle", response_class=HTMLResponse)
+    def configure_auto_strangle(
+        request: Request,
+        enabled: bool = Form(),
+        confirmation: str = Form(),
+        _user: str = Depends(require_login),
+    ) -> HTMLResponse:
+        try:
+            snapshot = paper_monitor.set_auto_strangle_entry(enabled, confirmation)
+            if enabled:
+                cycle = paper_monitor.run_cycle()
+                message = (
+                    "Automatic short-strangle entries enabled; monitoring started immediately. "
+                    f"{cycle.auto_strangle_last_action}"
+                )
+            else:
+                message = snapshot.auto_strangle_last_action
+            ok = True
+        except ValueError as exc:
+            message, ok = str(exc), False
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard.html",
+            context=dashboard_context(request, message, ok),
+        )
+
     @app.post("/actions/telegram-test", response_class=HTMLResponse)
     def test_telegram(request: Request, _user: str = Depends(require_login)) -> HTMLResponse:
         try:

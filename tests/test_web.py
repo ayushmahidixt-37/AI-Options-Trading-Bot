@@ -104,6 +104,36 @@ def test_web_dashboard_shows_paper_safety_and_actions(tmp_path: Path) -> None:
     assert "Readiness review" in enabled.text
 
 
+def test_web_dashboard_auto_strangle_toggle_requires_confirmation(tmp_path: Path) -> None:
+    client = TestClient(create_web_app(settings(tmp_path), "secret"))
+
+    response = client.get("/", auth=auth())
+    assert "Short-strangle automation" in response.text
+    assert "Automatic short-strangle entries" in response.text
+
+    rejected = client.post(
+        "/actions/auto-strangle",
+        data={"enabled": "true", "confirmation": "wrong"},
+        auth=auth(),
+    )
+    assert "Type ENABLE AUTO STRANGLE exactly" in rejected.text
+
+    enabled = client.post(
+        "/actions/auto-strangle",
+        data={"enabled": "true", "confirmation": "ENABLE AUTO STRANGLE"},
+        auth=auth(),
+    )
+    assert "Automatic short-strangle entries enabled" in enabled.text
+    assert "RUNNING" in enabled.text
+
+    disabled = client.post(
+        "/actions/auto-strangle",
+        data={"enabled": "false", "confirmation": "DISABLE AUTO STRANGLE"},
+        auth=auth(),
+    )
+    assert "Automatic short-strangle entries disabled" in disabled.text
+
+
 def test_strategy_validation_form_validates_ranges_and_exports(tmp_path: Path) -> None:
     client = TestClient(create_web_app(settings(tmp_path), "secret"))
     invalid = client.post(

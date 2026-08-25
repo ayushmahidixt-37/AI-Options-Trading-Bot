@@ -49,6 +49,12 @@ class PaperOrderRequest:
     strategy: str
     reason: str
     target_price: float | None = None
+    side: str = "BUY"
+    trade_group_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.side not in {"BUY", "SELL"}:
+            raise ValueError("side must be 'BUY' or 'SELL'")
 
     @property
     def units(self) -> int:
@@ -56,4 +62,13 @@ class PaperOrderRequest:
 
     @property
     def risk_at_stop(self) -> float:
+        """Worst-case loss if the stop fires, direction-aware.
+
+        A long (BUY) position loses as price falls *below* the stop; a
+        short (SELL) position -- added 2026-08-25 for the short strangle --
+        loses as price rises *above* it, since the position profits from
+        the option decaying toward zero and losses accumulate the other way.
+        """
+        if self.side == "SELL":
+            return max(0.0, self.stop_price - self.quote.price) * self.units
         return max(0.0, self.quote.price - self.stop_price) * self.units
