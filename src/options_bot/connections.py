@@ -21,10 +21,10 @@ from .credentials import load_credentials
 from .domain import Instrument, Quote
 from .indicators import atr, ema, rsi
 from .instruments import normalize_instruments
-from .market_archive import MarketArchive
+from .market_archive import ArchiveStats, MarketArchive
 from .research_ledger import initialize_ledger
 from .notifications import TelegramNotifier
-from .strategy import MomentumStrategy
+from .strategy_experimental import TrendConfirmedMomentumStrategy
 
 NIFTY_EXCHANGE = "NSE"
 NIFTY_SYMBOL = "Nifty 50"
@@ -36,6 +36,31 @@ MARKET_CLOSE = time(15, 30)
 INSTRUMENT_MASTER_URL = (
     "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 )
+
+# "Candidate B" -- the project's current best-proven strategy configuration
+# (TrendConfirmedMomentumStrategy + this exit/entry-filter shell). Wired into
+# live paper trading 2026-08-24; still labeled "Open, not Confirmed" in
+# research/INDEX.md pending confirmation against genuinely fresh data (the
+# 2020-08..2024-10 DhanHQ backfill added the same day satisfies that need,
+# but wasn't run before this went live -- a deliberate, informed choice, not
+# an oversight). See research/INDEX.md's "Current best candidate" section
+# for the full validation history and exact source of every value below.
+# The fixed rupee stop-distance budget Candidate B was actually validated
+# with: research's backtests used the plain default Settings
+# (max_loss_per_trade=400, stop_risk_fraction=1.6, see config.py), so
+# risk_budget = 400 * 1.6 = 640 is the real, proven figure -- a constant, NOT
+# ``settings.max_loss_per_trade * 1.6`` re-derived from whatever the live
+# config happens to be. RiskEngine.validate() separately hard-rejects any
+# trade whose loss_at_stop exceeds settings.max_loss_per_trade, so that live
+# config value must stay >= this figure (local-bot.env raised to 700 on
+# 2026-08-24 for exactly this reason) or every Candidate B trade gets
+# silently rejected -- re-deriving the budget from a *raised* max_loss_per_trade
+# instead would only inflate risk_budget along with it and never actually
+# clear that gate, which is the bug this constant avoids.
+CANDIDATE_B_RISK_BUDGET = 640.0
+CANDIDATE_B_TARGET_RETURN = 0.30
+CANDIDATE_B_MINIMUM_OPTION_PREMIUM = 20.0
+CANDIDATE_B_MINIMUM_OPEN_INTEREST = 100_000.0
 
 
 class ConnectionActionError(RuntimeError):
@@ -58,6 +83,7 @@ class PaperTradeProposal:
     ema_slow: float | None = None
     rsi_value: float | None = None
     atr_value: float | None = None
+    target_price: float | None = None
 
 
 @dataclass(frozen=True)
@@ -255,6 +281,10 @@ class ConnectionManager:
         self._last_catchup_date = None
         self._paper_cycle: Callable[[datetime], object] | None = None
         self._reconnect_count = 0
+        self._stats_cache: ArchiveStats | None = None
+        self._stats_cache_at: datetime | None = None
+        self._integrity_cache: str | None = None
+        self._integrity_cache_at: datetime | None = None
         state = self.archive.operational_state()
         self._consecutive_failures = int(
             state.get("consecutive_failures", {}).get("value", "0")
@@ -297,6 +327,14 @@ class ConnectionManager:
         self.archive.set_operational_state(
             "last_archive_write", observed_at.isoformat(), observed_at
         )
+        # Invalidate the cached stats (not just re-time them): a caller that
+        # just wrote new candles and immediately reads them back via
+        # cached_archive_stats/_refresh_archive_snapshot (e.g.
+        # refresh_option_archive, refresh_intelligence) must see the fresh
+        # count, not whatever was cached up to 5 minutes ago. The periodic
+        # background monitor tick still benefits from the cache the rest of
+        # the time -- this only busts it right when real data changed.
+        self._stats_cache = None
         with self._lock:
             self._snapshot = replace(
                 self._snapshot, last_archive_write_at=observed_at
@@ -326,8 +364,40 @@ class ConnectionManager:
             )
         return reason
 
-    def _refresh_archive_snapshot(self, now: datetime | None = None) -> None:
-        stats = self.archive.stats()
+    def cached_archive_stats(
+        self, *, now: datetime | None = None, include_integrity: bool = False, force: bool = False
+    ) -> ArchiveStats:
+        """Cached ``archive.stats()`` -- never a fresh, synchronous call per caller.
+
+        Added 2026-08-24: after the DhanHQ backfill grew the archive to 6+ GB
+        / 16M+ rows, an uncached ``archive.stats()`` was being called both on
+        every ~15s background monitor tick AND on every dashboard page load
+        (``build_readiness_report``) -- each one an unindexed COUNT(*)/MIN/MAX
+        full scan, and the readiness-report call also ran a full
+        ``PRAGMA quick_check`` every time. A live dashboard doesn't need
+        either figure fresher than a few minutes (the quick_check even less
+        often, since it's a much heavier page-by-page scan), so both are
+        cached here with independent refresh cadences instead of being
+        recomputed per call.
+        """
+        moment = now or datetime.now(self._settings.timezone)
+        if force or self._stats_cache is None or moment - self._stats_cache_at > timedelta(minutes=5):
+            self._stats_cache = self.archive.stats(skip_integrity_check=True)
+            self._stats_cache_at = moment
+        stats = self._stats_cache
+        if include_integrity:
+            if force or self._integrity_cache is None or moment - self._integrity_cache_at > timedelta(hours=1):
+                self._integrity_cache = self.archive.integrity_check()
+                self._integrity_cache_at = moment
+            stats = replace(stats, integrity_status=self._integrity_cache)
+        return stats
+
+    def _refresh_archive_snapshot(
+        self, now: datetime | None = None, *, force_integrity_check: bool = False
+    ) -> None:
+        stats = self.cached_archive_stats(
+            now=now, include_integrity=force_integrity_check, force=force_integrity_check,
+        )
         with self._lock:
             spot = self._snapshot.nifty_price
         today = (now or datetime.now(self._settings.timezone)).astimezone(
@@ -353,7 +423,12 @@ class ConnectionManager:
             )
 
     def refresh_archive_health(self) -> ConnectionSnapshot:
-        self._refresh_archive_snapshot()
+        """Explicit, user-triggered check ("Verify database" button) -- always
+        runs a real PRAGMA quick_check, unlike the passive periodic snapshot
+        refresh. A button whose whole purpose is verifying integrity must not
+        silently return a stale/skipped result.
+        """
+        self._refresh_archive_snapshot(force_integrity_check=True)
         return self.snapshot()
 
     def refresh_instrument_archive(
@@ -493,19 +568,39 @@ class ConnectionManager:
             raise ConnectionActionError("No matching ATM option is archived")
         quote = self.quote_instrument(instrument, now)
         price = quote.price
+        if price < CANDIDATE_B_MINIMUM_OPTION_PREMIUM:
+            raise ConnectionActionError(
+                f"Option premium {price:.2f} is below Candidate B's minimum "
+                f"{CANDIDATE_B_MINIMUM_OPTION_PREMIUM:.2f}"
+            )
+        with self.archive.connect() as con:
+            oi_row = con.execute(
+                """SELECT open_interest FROM market_candles
+                   WHERE instrument_token=? AND started_at<=?
+                   ORDER BY started_at DESC LIMIT 1""",
+                (instrument.token, now.isoformat()),
+            ).fetchone()
+        open_interest = float(oi_row[0]) if oi_row and oi_row[0] is not None else None
+        if open_interest is None or open_interest < CANDIDATE_B_MINIMUM_OPEN_INTEREST:
+            raise ConnectionActionError(
+                f"Open interest {open_interest} is below Candidate B's minimum "
+                f"{CANDIDATE_B_MINIMUM_OPEN_INTEREST:.0f}"
+            )
         expected_fill = price * (1 + self._settings.paper_slippage_bps / 10_000)
-        risk_budget = self._settings.max_loss_per_trade * 0.8
+        risk_budget = CANDIDATE_B_RISK_BUDGET
         fees = 2 * self._settings.paper_fee_per_order
         stop_distance = max(0.01, (risk_budget - fees) / instrument.lot_size)
         stop = round(expected_fill - stop_distance, 2)
         if stop <= 0 or stop >= price:
             raise ConnectionActionError("Configured risk budget cannot produce a valid stop")
+        target = round(expected_fill * (1 + CANDIDATE_B_TARGET_RETURN), 2)
         estimated_loss = round((expected_fill - stop) * instrument.lot_size + fees, 2)
         return PaperTradeProposal(
             proposal_id=str(uuid.uuid4()),
             instrument=instrument,
             quote=quote,
             stop_price=stop,
+            target_price=target,
             direction=signal,
             confidence=confidence or 0.0,
             reason=reason,
@@ -997,7 +1092,11 @@ class ConnectionManager:
         if not in_session:
             data_status = "last closed session"
 
-        strategy = MomentumStrategy()
+        # Candidate B's strategy shell -- see the CANDIDATE_B_* constants'
+        # comment above for provenance and status.
+        strategy = TrendConfirmedMomentumStrategy(
+            fast_period=5, slow_period=10, macro_period=60, rsi_period=21,
+        )
         signal = strategy.evaluate(candles)
         if len(candles) < strategy.minimum_candles:
             label = "INSUFFICIENT DATA"

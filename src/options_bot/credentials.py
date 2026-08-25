@@ -18,6 +18,10 @@ EXPECTED_CREDENTIAL_NAMES = frozenset(
         "UPSTOX_API_KEY",
         "UPSTOX_API_SECRET",
         "UPSTOX_ACCESS_TOKEN",
+        "DHAN_APP_ID",
+        "DHAN_APP_SECRET",
+        "DHAN_CLIENT_ID",
+        "DHAN_ACCESS_TOKEN",
     }
 )
 

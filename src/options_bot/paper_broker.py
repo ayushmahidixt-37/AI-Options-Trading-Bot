@@ -47,6 +47,7 @@ class PaperBroker:
                 "requested_price": request.quote.price,
                 "entry_fill_price": fill,
                 "stop_price": request.stop_price,
+                "target_price": request.target_price,
                 "entry_fee": fee,
                 "status": "OPEN",
                 "strategy": request.strategy,

@@ -179,6 +179,18 @@ class BacktestParameters:
     the position is never forced out at a fixed target, only once it pulls
     back from its own peak by ``trailing_stop`` after clearing the
     activation threshold.
+
+    ``minimum_implied_volatility``/``maximum_implied_volatility`` skip a
+    trade whose selected contract's implied volatility (as of the entry
+    candle, from DhanHQ's historical IV -- see ``dhan_ingest.py``'s
+    ``backfill_iv_for_weekly_cycle``) falls outside this range. A contract
+    with IV recorded as exactly ``0`` is treated as unknown (fails closed,
+    not as "very low IV") -- Dhan's own historical feed returns 0 for
+    illiquid/edge-case moments it apparently couldn't price, about 6.4% of
+    all backfilled rows; see BACKTEST_FINDINGS.md's 2026-08-24 IV entry for
+    the data-quality check performed before trusting this field. Only
+    meaningful for ``run_upstox_backtest`` with ``include_dhan=True`` --
+    Upstox-sourced candles never populate this column.
     """
 
     name: str = "Baseline"
@@ -201,6 +213,8 @@ class BacktestParameters:
     trailing_activation_return: float | None = None
     minimum_opening_range_pct: float | None = None
     opening_range_bars: int = 6
+    minimum_implied_volatility: float | None = None
+    maximum_implied_volatility: float | None = None
 
 
 def run_momentum_backtest(

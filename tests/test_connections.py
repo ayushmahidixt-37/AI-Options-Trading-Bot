@@ -10,6 +10,7 @@ import pytest
 from options_bot.config import Settings
 from options_bot.domain import Instrument
 from options_bot.connections import (
+    CANDIDATE_B_RISK_BUDGET,
     ConnectionActionError,
     ConnectionManager,
     _closed_five_minute_candles,
@@ -52,7 +53,7 @@ def credential_file(tmp_path: Path) -> Path:
     return path
 
 
-def candle_rows(now: datetime, count: int = 60) -> list[list[object]]:
+def candle_rows(now: datetime, count: int = 75) -> list[list[object]]:
     current_bucket = now.replace(minute=now.minute - now.minute % 5, second=0, microsecond=0)
     start = current_bucket - timedelta(minutes=5 * (count - 1))
     close = 24500.0
@@ -253,7 +254,7 @@ def test_refreshes_closed_five_minute_intelligence_and_suppresses_duplicate_aler
     assert first.intelligence_status == "ready"
     assert first.market_status == "OPEN"
     assert first.data_status == "fresh"
-    assert first.candle_count == 59
+    assert first.candle_count == 74
     assert first.latest_candle_at == datetime(2026, 8, 6, 13, 45, tzinfo=IST)
     assert first.signal_label == "BULLISH"
     assert first.ema_fast is not None
@@ -416,6 +417,15 @@ def test_creates_read_only_atm_paper_proposal_with_bounded_risk(tmp_path: Path) 
         ],
         now,
     )
+    with manager.archive.connect() as con:
+        con.execute(
+            """INSERT INTO market_candles(
+                   instrument_token, symbol, exchange_name, timeframe, started_at,
+                   open, high, low, close, source, collected_at, open_interest
+               ) VALUES ('CE', 'NIFTY13AUG2624600CE', 'NFO', 'FIVE_MINUTE', ?, 100, 100, 100, 100,
+                         'angel-one', ?, 150000)""",
+            (now.isoformat(), now.isoformat()),
+        )
     manager._snapshot = replace(
         manager.snapshot(),
         nifty_price=24620,
@@ -431,7 +441,12 @@ def test_creates_read_only_atm_paper_proposal_with_bounded_risk(tmp_path: Path) 
     assert proposal.instrument.option_type == "CE"
     assert proposal.quote.price == 100
     assert 0 < proposal.stop_price < proposal.quote.price
-    assert proposal.estimated_max_loss < manager._settings.max_loss_per_trade
+    # Candidate B's stop distance is a fixed, proven rupee budget
+    # (CANDIDATE_B_RISK_BUDGET) -- not derived from settings.max_loss_per_trade,
+    # which RiskEngine enforces as a separate, independent ceiling. See
+    # CANDIDATE_B_RISK_BUDGET's docstring in connections.py for why.
+    assert proposal.estimated_max_loss <= CANDIDATE_B_RISK_BUDGET
+    assert proposal.target_price > proposal.quote.price
 
 
 def test_candle_parser_rejects_duplicates_and_excludes_forming_candle() -> None:
@@ -456,7 +471,7 @@ def test_intelligence_fails_closed_for_insufficient_and_stale_data(tmp_path: Pat
     insufficient = manager._intelligence_snapshot(short, now)
     assert insufficient["signal_label"] == "INSUFFICIENT DATA"
 
-    stale_rows = candle_rows(now - timedelta(minutes=20), 60)
+    stale_rows = candle_rows(now - timedelta(minutes=20), 75)
     stale = _closed_five_minute_candles(stale_rows, now=now, timezone=IST)
     stale_snapshot = manager._intelligence_snapshot(stale, now)
     assert stale_snapshot["data_status"] == "stale"

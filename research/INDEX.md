@@ -41,11 +41,37 @@ params = BacktestParameters(
 - `exclude_macro_event_days=True` was tested and **should NOT be added** —
   macro-event-window trades average 2x the P&L of ordinary days for this
   candidate (75-trade sample), the opposite of the naive hypothesis.
-- **Still labeled Open, not Confirmed.** No fresh NIFTY/FIVE_MINUTE test
-  range exists — every range from 2024-10-03 through 2026-08-20 has
-  already been touched by dev/val/screening work. Confirmation needs a
-  future data pull or accumulated forward-paper evidence, not more
-  backtesting on what we already have.
+- **CONFIRMED 2026-08-24.** The 2024-10-03..2026-08-20 exhaustion this entry
+  used to cite is resolved: a DhanHQ backfill added genuinely fresh,
+  never-touched NIFTY underlying + option data for 2020-08-03..2024-10-01
+  (reconstructed from Dhan's ATM-relative rolling feed, then resampled
+  1-minute -> 5-minute to match how this candidate was built and validated
+  -- see `dhan_ingest.py`'s module docstring for the reconstruction/validation
+  detail). Run through the identical quarter-by-quarter discipline as the
+  original 7-quarter check, unchanged strategy/parameters, across all 17
+  quarters this new range covers: **15/17 profitable (88%)**, 2,356 trades,
+  net P&L +593,543.75, overall +5.98% ROI on capital actually deployed --
+  including the full 2022 bear market and 2020 COVID-recovery volatility.
+  Both losing quarters (2023-Q2, 2024-Q3-partial) were small/near-breakeven,
+  not blowups. Wired into live paper trading the same day, before this
+  confirmation run was performed (an informed, user-directed choice, not
+  a process violation) -- see the `CANDIDATE_B_*` constants near the top of
+  `connections.py`. Full detail: grep `BACKTEST_FINDINGS.md` for
+  `## 2026-08-24 — Candidate B confirmed on fresh 2020-2024 data`.
+- **2026-08-25 fine-tuning pass, both items resolved with a "no change" answer.**
+  A parameter re-sweep (1-year quick look, 24 combinations) found the current
+  live indicator periods already sit at a local optimum -- nothing tested beat
+  them. A DhanHQ implied-volatility filter (`band 10-20`: only enter when IV
+  is 10-20%) looked like a real, cross-validated capital-efficiency win on
+  screening data (+9.53%/+4.54% ROI vs baseline's +7.25%/+4.08% across two
+  splits) -- then **failed a genuinely fresh 18-month confirmation test**
+  (2025-03..2026-08, never touched before): both IV filter variants
+  underperformed the no-filter baseline (3.27%/3.95% ROI vs baseline's
+  4.02%). **Rejected** -- exactly the failure mode this project's
+  fresh-data-confirmation discipline exists to catch. The IV data itself
+  (16.2M+ backfilled values, zero warnings) remains archived and usable for
+  a different hypothesis later. Full detail: grep `BACKTEST_FINDINGS.md` for
+  `## 2026-08-25 — Fine-tuning pass`.
 
 Full detail: grep `BACKTEST_FINDINGS.md` for `## 2026-08-22 — Trend-confirmed momentum`
 (3 entries: parameter sweep, round 2 entry+exit sweep, per-trade loss post-mortem),

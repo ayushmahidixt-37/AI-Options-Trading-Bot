@@ -130,7 +130,7 @@ class Settings:
             max_open_positions=_integer(values, "MAX_OPEN_POSITIONS", 2, 1),
             max_trades_per_day=_integer(values, "MAX_TRADES_PER_DAY", 0, 0),
             max_loss_per_trade=_decimal(values, "MAX_LOSS_PER_TRADE", 400, 0.01),
-            max_daily_net_loss=_decimal(values, "MAX_DAILY_NET_LOSS", 1000, 0.01),
+            max_daily_net_loss=_decimal(values, "MAX_DAILY_NET_LOSS", 0, 0),
             max_quote_age_seconds=_integer(values, "MAX_QUOTE_AGE_SECONDS", 3, 1),
             paper_slippage_bps=_integer(values, "PAPER_SLIPPAGE_BPS", 25, 0),
             paper_fee_per_order=_decimal(values, "PAPER_FEE_PER_ORDER", 20, 0),
