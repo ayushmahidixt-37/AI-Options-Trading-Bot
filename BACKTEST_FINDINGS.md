@@ -2295,3 +2295,43 @@ hypothesis that didn't generalize, not the data source.
 - `dhan_data.py`: `DhanRollingPoint.implied_volatility`, `iv` added to every `fetch_rolling_option` call permanently (harmless to always request)
 - `upstox_backtest.py`: `dhan_only` parameter, `minimum_implied_volatility`/`maximum_implied_volatility` on `BacktestParameters`
 - The archive now has real historical IV across both the original 2020-2024 range and this new 2025-2026 range -- available for a *different* IV-based hypothesis if one comes up later, without re-fetching anything.
+
+## 2026-08-25 — ORB downgraded: does not hold up on fresh 2020-2024 data
+
+**Direct follow-up to Candidate B's fresh-data confirmation, using the identical methodology.**
+ORB (`OpeningRangeBreakoutStrategy(opening_range_bars=6)` + `stop_risk_fraction=1.6,
+target_return=0.30`, unchanged from its original screening) was run across the same 17 quarters
+of the 2020-2024 DhanHQ backfill Candidate B was confirmed on.
+
+| Quarter | Trades | Win rate | Net P&L | PF | ROI |
+|---|---|---|---|---|---|
+| 2020-Q3 (partial) | 31 | 41.9% | +8,962.50 | 1.53 | +8.81% |
+| 2020-Q4 | 53 | 39.6% | +11,290.00 | 1.28 | +5.51% |
+| 2021-Q1 | 48 | 31.2% | +1,872.50 | 1.04 | +0.71% |
+| 2021-Q2 | 57 | 35.1% | -4,660.00 | 0.89 | -2.12% |
+| 2021-Q3 | 48 | 39.6% | -1,170.00 | 0.96 | -0.72% |
+| 2021-Q4 | 41 | 41.5% | +680.00 | 1.02 | +0.34% |
+| 2022-Q1 | 54 | 40.7% | +1,427.50 | 1.02 | +0.38% |
+| 2022-Q2 | 49 | 40.8% | +1,142.50 | 1.02 | +0.42% |
+| 2022-Q3 | 59 | 44.1% | +1,807.50 | 1.04 | +0.66% |
+| 2022-Q4 | 49 | 53.1% | +20,477.50 | 1.79 | +9.47% |
+| 2023-Q1 | 47 | 44.7% | -8,012.50 | 0.80 | -4.21% |
+| 2023-Q2 | 41 | 46.3% | -2,792.50 | 0.87 | -2.27% |
+| 2023-Q3 | 65 | 38.5% | -3,355.00 | 0.91 | -1.53% |
+| 2023-Q4 | 46 | 32.6% | +9,270.00 | 1.26 | +5.66% |
+| 2024-Q1 | 59 | 32.2% | -4,147.50 | 0.93 | -1.42% |
+| 2024-Q2 | 48 | 37.5% | +3,231.25 | 1.09 | +1.93% |
+| 2024-Q3 (partial) | 55 | 34.5% | -6,608.75 | 0.77 | -4.60% |
+| **Total** | **850** | — | **+29,415.00** | — | **+0.82%** (blended) |
+
+**Only 10 of 17 quarters profitable (59%)**, a real four-quarter losing streak through 2023
+(Q1-Q3 plus 2024-Q1 all negative), and most "profitable" quarters are only marginally so (profit
+factor barely above 1.0). Blended ROI of 0.82% across the whole span is a small fraction of
+Candidate B's 5.98% on the identical range. This does not reproduce the "profitable in all 7
+quarters" result the original Oct 2024 - May 2026 screening found.
+
+**Downgraded from Open to Rejected as a standalone strategy on this evidence.** The original
+screening range was real but short (under 2 years) and evidently not representative of how this
+signal behaves across a full market cycle -- exactly the risk fresh-data confirmation exists to
+catch. **Not added to any live/combined portfolio.** The 2020-2024 archive itself (already backfilled
+for Candidate B) required no additional data work for this check.
