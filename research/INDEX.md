@@ -109,6 +109,17 @@ uncapped target. Current recommendation for ORB is unchanged:
 no additional filters. Grep `## 2026-08-23` entries in
 `BACKTEST_FINDINGS.md` for the full analysis.
 
+**DOWNGRADED to Rejected 2026-08-25.** Run through the identical 17-quarter
+fresh-data check that confirmed candidate B (same 2020-2024 DhanHQ range,
+unchanged parameters): only **10/17 quarters profitable (59%)**, a real
+four-quarter losing streak through 2023, blended ROI of just **+0.82%**
+across the whole span (candidate B's is +5.98% on the identical range).
+Does not reproduce the "profitable in all 7 quarters" result the original
+screening found -- that range was real but short (under 2 years) and
+evidently not representative of a full market cycle. **Not added to any
+live/combined portfolio.** Full detail: grep `BACKTEST_FINDINGS.md` for
+`## 2026-08-25 — ORB downgraded`.
+
 **2026-08-23, second round: three more ideas tested, all rejected or
 neutral.** EMA-separation (trend strength) filter on candidate B —
 rejected, monotonic degradation at every threshold. Real 15-minute
@@ -134,6 +145,17 @@ is also near-zero correlated with both** (-0.021 vs. candidate B, 0.016
 vs. ORB) and adds 3.5% more total profit to the combined book with no
 increase in the portfolio's own max drawdown. See the "Data-integrity
 bug found and fixed" 2026-08-23 entry for the full three-way numbers.
+
+**Caution added 2026-08-25: this whole diversification argument rests on
+ORB being a real, reliable profit source, and ORB was downgraded to
+Rejected the same day** (see above) -- only 10/17 quarters profitable and
++0.82% blended ROI on the fresh 2020-2024 data, a small fraction of
+candidate B's own +5.98% on the identical range. Low correlation with a
+strategy that barely holds its own doesn't provide the diversification
+benefit this section describes; the two-way (candidate B + short
+strangle) and three-way portfolio numbers above have not been re-checked
+on fresh data and should not be trusted as-is until ORB's role in them is
+reconsidered or re-run without it.
 
 ## Data coverage (verify freshness before trusting this)
 

@@ -5,7 +5,21 @@
 > priorities, operating instructions, or known limitations change.
 
 **Last updated:** 2026-08-25
-**2026-08-25 (latest) — a fine-tuning pass on Candidate B, both items resolved "no change needed."**
+**2026-08-25 (latest, later) — ORB downgraded to Rejected on fresh data, and the dashboard now
+starts itself automatically on trading days.** ORB was run through the identical 17-quarter
+fresh-2020-2024-data check that confirmed candidate B: only 10/17 quarters profitable, +0.82%
+blended ROI vs candidate B's +5.98% on the same range -- does not reproduce the "profitable in
+all 7 quarters" result its original (shorter) screening found. Not added to any live/combined
+portfolio; the existing two-/three-way diversification numbers in `research/INDEX.md` are flagged
+as needing a fresh re-check since they rest on ORB being solid. Separately: the paper dashboard
+had actually been down all morning (killed during yesterday's backfill work and never manually
+restarted) -- caught and fixed, and a Windows Scheduled Task (`OptionsBotDailyDashboard`,
+`scripts/windows_daily_start.ps1`) now starts it automatically ~09:05 IST every trading day,
+skipping weekends and the verified 2026 NSE holiday calendar (now populated in
+`local-bot.env`'s `NSE_HOLIDAYS`), with wake-from-sleep enabled so a sleeping machine doesn't
+silently skip it.
+
+**2026-08-25 (same day, earlier) — a fine-tuning pass on Candidate B, both items resolved "no change needed."**
 A single-year parameter re-sweep (24 combinations of indicator periods) found the current live
 config already sits at a local optimum -- nothing beat it. A DhanHQ implied-volatility entry
 filter looked like a genuine capital-efficiency win in screening (band 10-20% IV: +9.53%/+4.54%
