@@ -151,6 +151,8 @@ class MarketArchive:
                     params_fingerprint TEXT
                 );
                 CREATE INDEX IF NOT EXISTS candle_time_idx ON market_candles(started_at);
+                CREATE INDEX IF NOT EXISTS market_candles_source_idx
+                    ON market_candles(source, instrument_token);
                 CREATE INDEX IF NOT EXISTS instrument_expiry_idx
                     ON instruments(underlying, expiry, strike);
                 CREATE INDEX IF NOT EXISTS range_usage_scope_idx

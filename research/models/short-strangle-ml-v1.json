@@ -1,0 +1,125 @@
+{
+  "bias": 0.6490020481985204,
+  "feature_names": [
+    "opening_range_pct",
+    "day_of_week",
+    "days_to_expiry",
+    "is_macro_event_window",
+    "gap_from_prev_close_pct",
+    "realized_vol_5d",
+    "realized_vol_20d"
+  ],
+  "means": [
+    0.005446606993706337,
+    1.7269372693726937,
+    2.977859778597786,
+    0.0,
+    0.0008188418950193094,
+    0.008414162191110318,
+    0.010004158797722646
+  ],
+  "metadata": {
+    "base_variant": {
+      "opening_range_bars": 6,
+      "stop_multiple": 2.0,
+      "strike_distance_pct": 0.002,
+      "target_fraction": 0.5
+    },
+    "candidate_name": "short-strangle-ml-v1",
+    "dev_metrics_at_chosen_threshold": {
+      "max_drawdown": 36759.0,
+      "net_pnl": 44654.0,
+      "premium_collected_total": 4031949.5,
+      "profit_factor": 1.1678,
+      "return_on_premium_pct": 1.11,
+      "trades": 491,
+      "win_rate": 0.668
+    },
+    "dev_metrics_unfiltered_baseline": {
+      "max_drawdown": 25761.5,
+      "net_pnl": 24103.0,
+      "premium_collected_total": 4409597.5,
+      "profit_factor": 1.0756,
+      "return_on_premium_pct": 0.55,
+      "trades": 542,
+      "win_rate": 0.655
+    },
+    "dev_range": [
+      "2020-08-03",
+      "2023-04-30"
+    ],
+    "fresh_comparison": {
+      "existing_manual_opening_range_filter": {
+        "max_drawdown": 20502.5,
+        "net_pnl": -4817.45,
+        "premium_collected_total": 731686.5,
+        "profit_factor": 0.8974,
+        "return_on_premium_pct": -0.66,
+        "trades": 65,
+        "win_rate": 0.6
+      },
+      "ml_filter": {
+        "max_drawdown": 29559.25,
+        "net_pnl": -16561.05,
+        "premium_collected_total": 1060633.35,
+        "profit_factor": 0.7904,
+        "return_on_premium_pct": -1.56,
+        "trades": 85,
+        "win_rate": 0.5765
+      },
+      "unconditional_baseline": {
+        "max_drawdown": 28144.5,
+        "net_pnl": -13954.05,
+        "premium_collected_total": 1119191.85,
+        "profit_factor": 0.8239,
+        "return_on_premium_pct": -1.25,
+        "trades": 89,
+        "win_rate": 0.5843
+      }
+    },
+    "fresh_range": [
+      "2025-03-01",
+      "2026-08-18"
+    ],
+    "hyperparameters": {
+      "epochs": 2000,
+      "l2": 0.01,
+      "learning_rate": 0.1
+    },
+    "positive_rate": 0.6549815498154982,
+    "trained_at": "2026-08-25T23:32:02.386489",
+    "training_row_count": 542,
+    "val_metrics_at_chosen_threshold": {
+      "max_drawdown": 13274.0,
+      "net_pnl": 24010.0,
+      "premium_collected_total": 1519786.5,
+      "profit_factor": 1.214,
+      "return_on_premium_pct": 1.58,
+      "trades": 249,
+      "win_rate": 0.6988
+    },
+    "val_range": [
+      "2023-05-01",
+      "2024-10-01"
+    ]
+  },
+  "stds": [
+    0.002601300009079312,
+    1.472745456814148,
+    1.8563416376143995,
+    0.0,
+    0.007524791814813295,
+    0.005230871023790426,
+    0.0038193798837372686
+  ],
+  "threshold": 0.6,
+  "weights": [
+    0.18086585797605872,
+    0.029006460793468816,
+    0.011031594011978287,
+    0.0,
+    -0.10579121424579956,
+    -0.11898358655845447,
+    0.046130605675385516
+  ]
+}

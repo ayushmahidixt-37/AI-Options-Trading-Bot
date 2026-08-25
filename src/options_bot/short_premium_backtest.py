@@ -28,8 +28,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
+from . import short_strangle_ml_features
 from .config import Settings
 from .market_archive import MarketArchive
+from .ml_model import SignalQualityModel
 from .upstox_ingest import NIFTY_UNDERLYING_KEY
 
 DEFAULT_ENTRY_TIME = time(9, 45)
@@ -150,6 +152,7 @@ def run_short_strangle_backtest(
     include_derived: bool = False,
     include_dhan: bool = False,
     dhan_only: bool = False,
+    ml_model: SignalQualityModel | None = None,
 ) -> ShortPremiumResult:
     """Replay a daily short-strangle over archived Upstox candles.
 
@@ -166,6 +169,14 @@ def run_short_strangle_backtest(
     against). ``dhan_only`` scopes to the option legs only; the underlying
     query is unaffected since it's stored under one shared token regardless
     of source.
+
+    ``ml_model`` (added 2026-08-25), if given, *replaces*
+    ``variant.maximum_opening_range_pct`` as the day's entry gate --
+    ``short_strangle_ml_features.FEATURE_NAMES`` includes
+    ``opening_range_pct`` itself, so the model subsumes that hard cutoff
+    rather than stacking with it. See ``research/train_short_strangle_ml_model.py``
+    for how a model is trained; passing ``ml_model=None`` (the default)
+    leaves every existing caller's behavior completely unchanged.
     """
     variant = parameters or ShortStrangleParameters()
     derived_filter = "" if include_derived else " AND derived_from_timeframe IS NULL"
@@ -214,9 +225,21 @@ def run_short_strangle_backtest(
         slippage = settings.paper_slippage_bps / 10_000 if settings else 0.0
         fee = settings.paper_fee_per_order if settings else 0.0
         trades: list[ShortStrangleTrade] = []
+        # Causal, day-by-day rolling state for short_strangle_ml_features --
+        # updated once per calendar day regardless of whether a trade is
+        # taken that day, using only closes strictly before today, so the
+        # ML path below never sees data from its own decision day.
+        prior_close: float | None = None
+        trailing_daily_returns: list[float] = []
 
         for day, day_rows in sorted(by_day.items()):
             day_rows.sort()
+            day_close = day_rows[-1][1]
+            previous_close = prior_close
+            if previous_close is not None:
+                trailing_daily_returns.append((day_close - previous_close) / previous_close)
+            prior_close = day_close
+
             entry_row = next(
                 (row for row in day_rows if datetime.fromisoformat(row[0]).time() >= variant.entry_time),
                 None,
@@ -228,7 +251,37 @@ def run_short_strangle_backtest(
                 continue
             spot = entry_row[1]
 
-            if variant.maximum_opening_range_pct is not None:
+            if ml_model is not None:
+                # Replaces maximum_opening_range_pct entirely -- see the
+                # docstring above. opening_range_pct is itself one of the
+                # model's features, so this is a strict generalization of
+                # the hard cutoff, not a second, stacked filter.
+                opening_bars = day_rows[: variant.opening_range_bars]
+                if len(opening_bars) < variant.opening_range_bars:
+                    continue
+                range_high = max(r[2] for r in opening_bars)
+                range_low = min(r[3] for r in opening_bars)
+                if range_low <= 0:
+                    continue
+                expiry_row = con.execute(
+                    "SELECT MIN(expiry) FROM instruments WHERE underlying='NIFTY' AND expiry>=date(?)",
+                    (day,),
+                ).fetchone()
+                if not expiry_row or not expiry_row[0]:
+                    continue
+                days_to_expiry = (date.fromisoformat(expiry_row[0]) - date.fromisoformat(day)).days
+                features = short_strangle_ml_features.extract_features(
+                    entry_day=date.fromisoformat(day),
+                    range_high=range_high,
+                    range_low=range_low,
+                    days_to_expiry=days_to_expiry,
+                    prior_close=previous_close,
+                    entry_spot=spot,
+                    trailing_daily_returns=trailing_daily_returns,
+                )
+                if not ml_model.decide(features):
+                    continue
+            elif variant.maximum_opening_range_pct is not None:
                 opening_bars = day_rows[: variant.opening_range_bars]
                 if len(opening_bars) < variant.opening_range_bars:
                     continue  # not enough of the day archived to judge the opening range

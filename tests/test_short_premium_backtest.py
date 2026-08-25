@@ -6,12 +6,28 @@ from zoneinfo import ZoneInfo
 from options_bot.config import Settings
 from options_bot.domain import Instrument
 from options_bot.market_archive import MarketArchive
+from options_bot.ml_model import SignalQualityModel
 from options_bot.short_premium_backtest import (
     ShortStrangleParameters,
     run_short_strangle_backtest,
 )
+from options_bot.short_strangle_ml_features import FEATURE_NAMES
 from options_bot.upstox_data import UpstoxCandle
 from options_bot.upstox_ingest import NIFTY_UNDERLYING_KEY
+
+
+def _always_model(*, threshold: float, bias: float) -> SignalQualityModel:
+    """A model whose score ignores every feature -- bias alone decides,
+    letting a test assert the gating mechanics without a real fit."""
+    return SignalQualityModel(
+        feature_names=FEATURE_NAMES,
+        means=tuple(0.0 for _ in FEATURE_NAMES),
+        stds=tuple(1.0 for _ in FEATURE_NAMES),
+        weights=tuple(0.0 for _ in FEATURE_NAMES),
+        bias=bias,
+        threshold=threshold,
+        metadata={},
+    )
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -276,6 +292,36 @@ def test_run_short_strangle_backtest_maximum_opening_range_pct_skips_wide_days(t
         parameters=ShortStrangleParameters(strike_distance_pct=0.01, maximum_opening_range_pct=None),
     )
     assert unfiltered.trades == 1
+
+
+def test_run_short_strangle_backtest_ml_model_gates_entries_and_overrides_opening_range_pct(tmp_path) -> None:
+    """ml_model, when given, must decide the day on its own -- ignoring
+    variant.maximum_opening_range_pct entirely, not stacking with it."""
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    day_start = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    _seed_underlying_with_opening_range(archive, day_start, spot=25000.0, opening_range_pct=0.02)
+    _seed_legs(
+        archive, day_start, expiry=date(2026, 8, 27),
+        call_strike=25300.0, call_prices=[100.0] * 20,
+        put_strike=24700.0, put_prices=[90.0] * 20,
+    )
+    settings = _settings(tmp_path)
+    # A tight maximum_opening_range_pct that would normally reject this
+    # (2%-wide) day on its own -- the ML model must be the thing deciding.
+    params = ShortStrangleParameters(strike_distance_pct=0.01, maximum_opening_range_pct=0.01)
+
+    rejecting = run_short_strangle_backtest(
+        archive, start=date(2026, 8, 6), end=date(2026, 8, 6), settings=settings,
+        parameters=params, ml_model=_always_model(threshold=0.5, bias=-10.0),
+    )
+    assert rejecting.trades == 0
+
+    approving = run_short_strangle_backtest(
+        archive, start=date(2026, 8, 6), end=date(2026, 8, 6), settings=settings,
+        parameters=params, ml_model=_always_model(threshold=0.5, bias=10.0),
+    )
+    assert approving.trades == 1
 
 
 def test_short_strangle_result_return_on_premium_is_distinct_from_win_rate(tmp_path) -> None:

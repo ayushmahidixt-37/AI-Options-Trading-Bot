@@ -2388,3 +2388,77 @@ a copy of the real production database before any of this was built on top of it
 unrelated failures as before -- 2 `fcntl`-only-on-Linux in `test_service.py`, one in `test_market_archive.py`,
 one in `test_readiness.py`). `LIVE_TRADING_ENABLED` remains `false`; nothing above changed that boundary --
 this is all still paper-only.
+
+## 2026-08-25 — Short strangle ML entry filter: rejected on fresh data, and the fresh range exposes a more urgent problem
+
+**Direct response to a user request for an ML-driven entry decision for the short strangle**, going beyond the
+existing hand-tuned `maximum_opening_range_pct` cutoff. Built `short_strangle_ml_features.py` (day-level features:
+`opening_range_pct`, `day_of_week`, `days_to_expiry`, `is_macro_event_window`, `gap_from_prev_close_pct`,
+`realized_vol_5d`, `realized_vol_20d` — `opening_range_pct` is itself one of the features, so the model is a
+generalization of the existing cutoff, not an unrelated second filter), wired an optional `ml_model` parameter
+into `run_short_strangle_backtest` that replaces `maximum_opening_range_pct` entirely when supplied, and reused
+this project's existing hand-rolled logistic-regression infrastructure (`ml_model.py`, the same dependency-free
+scorer Candidate B's own ML filter uses) via a new `research/train_short_strangle_ml_model.py`.
+
+**A real, previously-undiscovered performance bug was found and fixed along the way, independent of the ML
+result:** `market_candles` had no index on `source`, so every `source='dhan'`/`source='upstox'` filtered query in
+this ~6GB archive (which is nearly all of them) required a full table scan — simple counts were taking 300-400+
+seconds. Added `CREATE INDEX market_candles_source_idx ON market_candles(source, instrument_token)` to
+`market_archive.py`'s schema (idempotent, applied automatically to every archive going forward); the same query
+that returned an unindexed dev backtest in 12+ minutes without finishing completed in well under a minute after
+the one-time ~5-minute index build. This benefits every backtest engine in the project, not just this one.
+
+**Training used 542 labeled development days** (2020-08-03 to 2023-04-30, unconditional baseline for labels,
+positive_rate 65.5%) — a genuinely large sample, unlike Candidate B's earlier ML attempt which was rejected as
+"Open" specifically because only 68 development trades were available (2026-08-21 entry) before the DhanHQ
+backfill existed. Threshold swept [0.05, 0.80] step 0.05 against validation (2023-05-01 to 2024-10-01):
+
+| | Trades | Win rate | Net P&L | Profit factor |
+|---|---|---|---|---|
+| Development, unfiltered baseline | 542 | 65.5% | +24,103.00 | 1.08 |
+| Development, ML at threshold=0.60 | 491 | 66.8% | +44,654.00 | 1.17 |
+| Validation, ML at threshold=0.60 | 249 | 69.9% | +24,010.00 | 1.21 |
+
+**Looked like a genuine, consistent win on both development and validation** — nearly double the baseline's net
+P&L on development, held up on validation too. Exactly the shape that has fooled this project before (the IV
+filter, 2026-08-25 earlier entry). Ran the real, disjoint, never-before-touched-by-this-strategy fresh range
+(2025-03-01 to 2026-08-18, the same range already spent on Candidate B's IV filter hypothesis but never on the
+short strangle) as the actual test:
+
+| Fresh 2025-03..2026-08 | Trades | Win rate | Net P&L | Profit factor |
+|---|---|---|---|---|
+| Unconditional baseline (no filter at all) | 89 | 58.4% | -13,954.05 | 0.82 |
+| **Existing manual `maximum_opening_range_pct=0.005` filter** | 65 | 60.0% | **-4,817.45** | 0.90 |
+| ML filter (threshold=0.60) | 85 | 57.7% | -16,561.05 | 0.79 |
+
+**The ML filter is Rejected — not just "didn't help," it did worse than doing nothing at all** on the one number
+that counts, the opposite of what development/validation predicted. Textbook overfitting to that period's
+specific regime, the same failure mode the IV filter hit hours earlier. Not adopted; not wired into
+`create_short_strangle_proposal`, which still uses the plain hand-tuned filter exactly as before this entry.
+
+**A more urgent finding buried in the same table: the already-confirmed manual filter itself lost money on this
+fresh range** (-4,817.45 across 65 trades, profit factor 0.90 — below 1.0). This directly concerns the
+short-strangle live-execution path built earlier today, since its "ENABLE AUTO STRANGLE" toggle governs exactly
+this configuration. Two things temper how much weight to put on this before treating it as a reversal of the
+strategy's 2020-2024 confirmation (12/17 quarters, +67,980, unaffected by anything in this entry):
+- Only 65 of the ~380 trading days in this 17.5-month window produced an archived, tradeable pair of legs at the
+  configured 0.2% OTM strike distance — the same narrow/asymmetric OTM strike-coverage gap already documented in
+  the 2026-08-23 entry, not a new problem, but it makes this specific sample thinner than the 2020-2024
+  confirmation's 526 trades.
+- This one 17.5-month window has not itself been split and re-checked (e.g. quarter by quarter) the way every
+  *confirmed* result in this log has been -- it is a single aggregate number, not yet given the same scrutiny.
+- The IV filter's fresh test on this identical calendar range found Candidate B's *unrelated* directional
+  strategy also underperformed its own baseline there (3.27-3.95% vs 4.02% ROI, still profitable, just less so)
+  -- some evidence this window was simply a harder one across strategies, not strangle-specific.
+
+**Recommendation: do not enable "AUTO STRANGLE" live until this fresh-range result is understood better** --
+ideally with a proper quarter-by-quarter breakdown of 2025-03..2026-08 (mirroring every other confirmed
+strategy's table in this log, which this entry does not yet have) to see whether the loss is concentrated in a
+specific stretch or spread evenly. The live paper-execution code built earlier today is unaffected either way --
+it is inert until a human explicitly flips that toggle, and this finding is exactly why that toggle defaults off.
+
+Infrastructure added, independent of the ML rejection: `short_strangle_ml_features.py` (7 tests),
+`run_short_strangle_backtest`'s `ml_model` parameter (1 test), `market_candles_source_idx` (the whole test suite
+re-ran clean against it, 288 passed). `research/models/short-strangle-ml-v1.json` committed for
+reproducibility (small, diffable, weights and metadata only, no raw market data), matching Candidate B's
+`ml-signal-quality-v1.json` precedent even though this one is a negative result.

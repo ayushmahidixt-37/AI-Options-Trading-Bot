@@ -168,6 +168,18 @@ numbers. This two-way result is real and trusted; live (paper-only)
 short-strangle execution was built on top of it the same day (separate
 "ENABLE/DISABLE AUTO STRANGLE" toggle, off by default).
 
+**Second caution added 2026-08-25, same day: an ML entry filter for the strangle was rejected, and testing it
+surfaced a more urgent problem** -- on the genuinely fresh 2025-03..2026-08 range (never touched by the strangle
+before), the *existing, already-confirmed* manual `maximum_opening_range_pct` filter itself lost money
+(-4,817.45 net P&L across 65 trades, profit factor 0.90), not just the new ML variant that was being tested (see
+BACKTEST_FINDINGS.md's "Short strangle ML entry filter" 2026-08-25 entry for the full numbers and caveats --
+sample is thinner than the 2020-2024 confirmation due to known OTM strike-coverage gaps, and the range hasn't
+been split quarter-by-quarter yet). **Do not enable the live "AUTO STRANGLE" toggle until this is understood
+better.** The 2020-2024 confirmation (12/17 quarters, +67,980) and the combined-portfolio check above are not
+directly contradicted by this -- it's a different, more recent time window -- but it is real evidence the
+strategy's edge may not hold up on the most current data, and needs to be treated as an open question, not
+dismissed.
+
 ## Data coverage (verify freshness before trusting this)
 
 - Real Upstox `FIVE_MINUTE`: 2024-10-03 to 2026-08-20 (`derived_from_timeframe IS NULL`).
