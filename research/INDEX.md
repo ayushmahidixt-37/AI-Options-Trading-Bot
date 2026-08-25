@@ -170,15 +170,15 @@ short-strangle execution was built on top of it the same day (separate
 
 **Second caution added 2026-08-25, same day: an ML entry filter for the strangle was rejected, and testing it
 surfaced a more urgent problem** -- on the genuinely fresh 2025-03..2026-08 range (never touched by the strangle
-before), the *existing, already-confirmed* manual `maximum_opening_range_pct` filter itself lost money
-(-4,817.45 net P&L across 65 trades, profit factor 0.90), not just the new ML variant that was being tested (see
-BACKTEST_FINDINGS.md's "Short strangle ML entry filter" 2026-08-25 entry for the full numbers and caveats --
-sample is thinner than the 2020-2024 confirmation due to known OTM strike-coverage gaps, and the range hasn't
-been split quarter-by-quarter yet). **Do not enable the live "AUTO STRANGLE" toggle until this is understood
-better.** The 2020-2024 confirmation (12/17 quarters, +67,980) and the combined-portfolio check above are not
-directly contradicted by this -- it's a different, more recent time window -- but it is real evidence the
-strategy's edge may not hold up on the most current data, and needs to be treated as an open question, not
-dismissed.
+before), the *existing, already-confirmed* manual `maximum_opening_range_pct` filter itself lost money overall
+(-4,817.45 net P&L across 65 trades). The quarter-by-quarter breakdown (added same day, see
+BACKTEST_FINDINGS.md's "Short strangle ML entry filter" entry) shows this isn't a uniform decay: four
+consecutive rough quarters (2025-Q2 through 2026-Q1) followed by the two most recent quarters both strongly
+positive. Samples per quarter are thin (3-22 trades). **Recommendation: don't enable the live "AUTO STRANGLE"
+toggle from a standing start on this evidence, but this reads as a case for watching a few more weeks of live
+paper data before deciding, not for abandoning the strategy** -- the 2020-2024 confirmation (12/17 quarters,
++67,980) and the combined-portfolio check above are not contradicted by this, and the most recent quarters look
+as strong as anything in that confirmation.
 
 ## Data coverage (verify freshness before trusting this)
 

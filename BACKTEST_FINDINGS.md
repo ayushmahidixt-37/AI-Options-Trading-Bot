@@ -2451,11 +2451,31 @@ strategy's 2020-2024 confirmation (12/17 quarters, +67,980, unaffected by anythi
   strategy also underperformed its own baseline there (3.27-3.95% vs 4.02% ROI, still profitable, just less so)
   -- some evidence this window was simply a harder one across strategies, not strangle-specific.
 
-**Recommendation: do not enable "AUTO STRANGLE" live until this fresh-range result is understood better** --
-ideally with a proper quarter-by-quarter breakdown of 2025-03..2026-08 (mirroring every other confirmed
-strategy's table in this log, which this entry does not yet have) to see whether the loss is concentrated in a
-specific stretch or spread evenly. The live paper-execution code built earlier today is unaffected either way --
-it is inert until a human explicitly flips that toggle, and this finding is exactly why that toggle defaults off.
+**Immediate follow-up, same day -- the quarter-by-quarter breakdown, done properly rather than left as an open
+question:**
+
+| Period | Trades | Win rate | Net P&L | Profit factor |
+|---|---|---|---|---|
+| 2025-03 (partial) | 1 | 0.0% | -3,000.50 | 0.00 |
+| 2025-Q2 | 4 | 50.0% | -9,126.50 | 0.14 |
+| 2025-Q3 | 22 | 54.5% | -2,504.00 | 0.81 |
+| 2025-Q4 | 13 | 61.5% | +4,282.00 | 1.64 |
+| 2026-Q1 | 14 | 50.0% | -6,104.85 | 0.50 |
+| 2026-Q2 | 3 | 100.0% | +5,893.40 | — |
+| 2026-Q3 (partial) | 8 | 87.5% | +5,743.00 | 7.08 |
+| **Total** | **65** | — | **-4,817.45** | — |
+
+**Not a uniform decay -- a rough patch (2025-Q2 through 2026-Q1, all four negative) followed by a recovery in
+the two most recent quarters (2026-Q2 and 2026-Q3, both strongly positive).** The worst single quarter
+(2025-Q2, -9,126.50) is also the thinnest sample (4 trades) -- a couple of bad losses on a handful of trades,
+not a broad pattern. Every quarter here has a small enough sample (3-22 trades vs. the 2020-2024 confirmation's
+30-65 per quarter) that no single number should be trusted in isolation. Taken together: real evidence of a
+weaker stretch through early 2026, not evidence the strategy has stopped working -- the two most recent
+quarters look as strong as anything in the 2020-2024 confirmation. **Recommendation unchanged: do not enable
+"AUTO STRANGLE" live from a standing start on this evidence, but this is a case for watching a few more weeks
+of live paper data before deciding, not for abandoning the strategy.** The live paper-execution code built
+earlier today is unaffected either way -- it is inert until a human explicitly flips that toggle, and this
+finding is exactly why that toggle defaults off.
 
 Infrastructure added, independent of the ML rejection: `short_strangle_ml_features.py` (7 tests),
 `run_short_strangle_backtest`'s `ml_model` parameter (1 test), `market_candles_source_idx` (the whole test suite

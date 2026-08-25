@@ -16,9 +16,12 @@ doubled). **Failed the fresh 2025-03..2026-08 test outright** -- worse than doin
 overfitting pattern that rejected the IV filter hours earlier. **More importantly: on that same fresh range,
 the existing manual filter also lost money** (-4,817.45 net P&L, 65 trades) -- this doesn't overturn the
 2020-2024 confirmation, but it's real evidence the strategy's edge may not be holding up on the most current
-data. **Recommendation: do not enable the live "ENABLE AUTO STRANGLE" toggle** (it's off by default and stays
-that way) until this is understood better, ideally with a proper quarter-by-quarter breakdown of the fresh
-range. Also found and fixed a real, unrelated performance bug along the way: `market_candles` had no index on
+data. The quarter-by-quarter breakdown (added same day) shows this isn't a uniform decay: four rough quarters
+(2025-Q2 through 2026-Q1) followed by the two most recent quarters both strongly positive -- a case for
+watching a few more weeks of live paper data before deciding, not for abandoning the strategy.
+**Recommendation: do not enable the live "ENABLE AUTO STRANGLE" toggle from a standing start** (it's off by
+default and stays that way) until more recent evidence accumulates. Also found and fixed a real, unrelated
+performance bug along the way: `market_candles` had no index on
 `source`, so every Dhan/Upstox-filtered query in the ~6GB archive was a full table scan (simple counts took
 300-400+ seconds); added `market_candles_source_idx`, cutting an unfinished 12+-minute backtest down to under a
 minute. See `BACKTEST_FINDINGS.md`'s "Short strangle ML entry filter" 2026-08-25 entry for full numbers.
