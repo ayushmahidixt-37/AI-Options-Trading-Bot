@@ -2975,3 +2975,61 @@ signal is indistinguishable from random and the ~1.44% cost floor dominates. But
 *structural* defects found rather than parameter preferences, and OI is signal-level rather than
 exit-level. Next step if pursued: test a percentage stop and an OI filter together under
 dev/val/held-out discipline, from a committed script, stating sample counts.
+
+## 2026-08-26 (ninth entry) — The OI lead: lookahead bug found in our own analysis, corrected, then rejected out-of-sample
+
+**Three stages in one afternoon, recorded in full because the failure mode is instructive.**
+
+### Stage 1: a lookahead bug in the eighth entry's OI screen
+
+The eighth entry reported trades with rising open interest winning at 17% versus 38% and called it
+"the most promising signal found in the entire session." That measurement was **wrong**: it computed
+OI change from entry to the *session's end*, a window extending past both the entry decision and the
+exit. It used information that does not exist when a filter would have to act — a description of what
+accompanied failure, not a predictor of it. **That framing is retracted.**
+
+### Stage 2: corrected causally, and it initially survived
+
+`research/oi_entry_filter_check.py` measures OI over the 6 candles strictly **before** entry, reading
+nothing at or after the entry timestamp. On 2021 the effect shrank but held, and produced the first
+positive P&L subset of the entire session:
+
+| 2021, 521 trades | n | Win rate | Total P&L | P&L/trade |
+|---|---|---|---|---|
+| pre-entry OI rising | 265 | 29.4% | -29,126.00 | -109.91 |
+| **pre-entry OI falling/flat** | 256 | **41.4%** | **+5,557.00** | **+21.71** |
+
+Win-rate gap +12.0 points (versus +21.0 with the lookahead). Quartiles trended the right way. It
+looked like a genuine, causal entry filter.
+
+### Stage 3: rejected on the other three years
+
+| Year | OI falling/flat P&L | per trade | OI rising P&L | per trade | Gap |
+|---|---|---|---|---|---|
+| 2021 (discovery) | **+5,557.00** | +21.71 | -29,126.00 | -109.91 | **+12.0 pts** |
+| 2022 | **+15,904.50** | +56.00 | -35,987.00 | -132.31 | **+9.3 pts** |
+| 2023 | -32,727.50 | -100.39 | -2,520.00 | -12.00 | **-2.3 pts** (reversed) |
+| 2024 | -33,836.00 | -123.49 | -19,597.50 | -61.43 | **-5.3 pts** (reversed) |
+
+**Two years for, two years against — a coin flip.** The favourable bucket's P&L across all four years
+sums to **-45,102**, comfortably negative. The 2021-2022 result was a regime artefact, not an edge.
+**Rejected. Not adopted.**
+
+### Why this entry is worth keeping
+
+The sequence — promising screen, self-caught lookahead bug, causal correction, immediate
+out-of-sample test, rejection — is the process working as intended. Had the eighth entry's number
+been acted on, it would have been a filter built on future data. Had the corrected 2021 result been
+acted on, it would have been a filter that reverses half the time.
+
+Two rules this reinforces, both already visible in the retractions above:
+1. **Any screen measured over a window that extends past the decision point is invalid**, however
+   good the numbers look. Check the window before checking the result.
+2. **A single-year result is a hypothesis, never a finding**, even after the lookahead is removed.
+   Three of today's four promising leads (exit shell, ML filter, OI) survived their discovery window
+   and died on the next one.
+
+With this rejected, **no entry filter, exit shell, granularity, or ML variant tested in this project
+has produced a cost-inclusive edge that survives out-of-sample.** The remaining defensible work is
+the percentage-based stop (a correctness fix, not an edge claim) and a redesign around the ~1.44%
+round-trip cost floor.
