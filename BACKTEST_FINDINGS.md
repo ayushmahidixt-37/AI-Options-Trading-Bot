@@ -2770,6 +2770,17 @@ foundations now in place (committed scripts, real costs, risk-based sizing, hone
 
 ## 2026-08-26 (sixth entry) — Candidate B on genuine 1-minute data: no rescue, and a hard cost floor quantified
 
+> **CORRECTION, same day, found within the hour.** The two headline runs in this entry were executed
+> through `options-bot backtest run`, which — as written at the time — **never passed a strategy to
+> the engine**, so `run_upstox_backtest` fell back to its default `MomentumStrategy()`. The numbers
+> below therefore measured the **plain baseline momentum strategy, not Candidate B**, despite the
+> heading. This is the same class of defect as the two retractions above: a run labelled as one
+> configuration while executing another. Corrected figures for both strategies are in the seventh
+> entry below; the *cost-floor* arithmetic in this entry is unaffected, because fee drag per rupee
+> deployed does not depend on which signal generated the trades. Root cause fixed: the CLI now has a
+> required-by-default `--strategy` flag (`momentum` | `candidate-b`), so the silent fallback cannot
+> recur — see the seventh entry.
+
 **Why this was worth testing.** The findings log records the 1-minute archive as "never read directly
 by any backtest engine", and `range_usage` is scoped per timeframe, so ONE_MINUTE was genuinely
 unmined. It is also 5.8x more observations rather than the same data re-run — the one honest way to
@@ -2824,3 +2835,68 @@ to close, and it is a far more useful design target than "is this profitable".
 **Status: 1-minute is not rejected as a research direction** — it remains 452,096 genuinely unmined
 candles with a fresh ledger scope. What is rejected, again, is Candidate B's entry signal, now at a
 second independent granularity.
+
+## 2026-08-26 (seventh entry) — Random-entry benchmark: Candidate B shows no demonstrable skill; plus a mislabelling correction
+
+**Two results: a correction to the sixth entry, and the null-hypothesis test that settles whether
+further indicator tuning is worth doing.**
+
+### Correction: the sixth entry measured the wrong strategy
+
+`options-bot backtest run` never passed a strategy to the engine, so `run_upstox_backtest` fell back
+to its default `MomentumStrategy()`. The sixth entry's runs were therefore the plain baseline, not
+Candidate B, despite the heading — the same defect class as the two retractions above (a run labelled
+as one configuration while executing another). Corrected, both strategies, full-year 2021:
+
+| Timeframe | Strategy | Trades | Win rate | Net P&L | ROC | PF |
+|---|---|---|---|---|---|---|
+| ONE_MINUTE | **Candidate B** | 3,395 | 27.0% | -214,221.00 | -1.44% | 0.754 |
+| ONE_MINUTE | MomentumStrategy | 3,575 | 27.7% | -206,574.50 | -1.31% | 0.772 |
+| FIVE_MINUTE | **Candidate B** | 530 | 35.3% | -22,180.50 | **-0.96%** | 0.889 |
+| FIVE_MINUTE | MomentumStrategy | 661 | 32.2% | -52,493.00 | -1.80% | 0.792 |
+
+Two corrections follow. **(a)** For Candidate B, 1-minute is clearly *worse* than 5-minute
+(PF 0.754 vs 0.889), the opposite of what the mislabelled entry implied — that entry's
+"1-minute marginally better on ROC" was a property of MomentumStrategy, not Candidate B.
+**(b)** Candidate B does beat plain momentum on 5-minute (-0.96% vs -1.80% ROC). Both still lose.
+The cost-floor arithmetic in the sixth entry stands unchanged, since fee drag per rupee deployed does
+not depend on which signal produced the trades.
+
+**Root cause fixed** so this cannot recur: the CLI now takes `--strategy`
+(`momentum` | `candidate-b`). The default stays `momentum` deliberately — changing it would
+retroactively alter what every previously-run command meant — and the help text states explicitly
+that passing nothing does *not* give Candidate B. This matters most for automated/agent-driven use,
+which would otherwise hit the identical trap silently.
+
+### The null-hypothesis test
+
+`research/random_entry_benchmark.py` replaces only the *source of the direction* with a coin flip,
+holding contract selection, entry filters, exit shell, lot size, fees and slippage identical, at a
+matched signal rate (~630 random trades vs Candidate B's 530). Compared on return-on-capital, which
+normalises for trade count. Full-year 2021, 5-minute, 12 seeds:
+
+| | Return on capital |
+|---|---|
+| **Candidate B** | **-0.96%** |
+| Random: best seed | -0.61% |
+| Random: mean | -1.89% (stdev 0.86) |
+| Random: worst seed | -3.66% |
+
+**Candidate B falls INSIDE the random distribution.** It sits +1.08 standard deviations above the
+random mean, and **1 of 12 random seeds matched or beat it** (~p=0.08 one-tailed) — suggestive, but
+not statistically established, and well short of any reasonable bar. Resolving whether the +0.93pp
+gap versus the random mean is real would need on the order of 40+ seeds.
+
+**That question does not need resolving, because it changes nothing.** Even taking the gap entirely
+at face value, +0.93pp of edge sits far below the ~1.44% round-trip cost floor established in the
+sixth entry. A signal that cannot pay its own costs is untradeable whether or not its edge is
+statistically real. **Further indicator tuning on Candidate B is not justified.**
+
+### A methodological note worth keeping
+
+A 2-seed calibration run showed Candidate B beating **both** seeds at +1.30 standard deviations, and
+the script duly printed "falls OUTSIDE the random distribution — the signal is doing something real."
+Twelve seeds reversed that verdict. Two samples cannot distinguish +1 SD from noise, and the
+temptation to stop at the encouraging answer is exactly how the retracted confirmations happened.
+**Any future null-hypothesis test in this project should run at least a dozen seeds before its
+verdict is quoted, and the seed count should be stated alongside the result.**

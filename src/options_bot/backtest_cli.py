@@ -26,6 +26,8 @@ from pathlib import Path
 from .backtest import BacktestParameters, BacktestResult
 from .config import Settings
 from .market_archive import MarketArchive
+from .strategy import MomentumStrategy
+from .strategy_experimental import TrendConfirmedMomentumStrategy
 from . import ml_model as ml_model_module
 from .research_ledger import (
     CALLER_ASSIGNABLE_OUTCOME_LABELS,
@@ -46,6 +48,16 @@ from .research_ledger import (
 from .upstox_backtest import run_upstox_backtest
 from .upstox_ml_backtest import run_upstox_ml_backtest
 from .upstox_ingest import NIFTY_UNDERLYING_KEY
+
+# Entry signals selectable from the command line. Kept as factories so each
+# run gets a fresh instance, and so a future stateful strategy cannot leak
+# state between the development/validation/test legs of one invocation.
+STRATEGY_CHOICES = {
+    "momentum": lambda: MomentumStrategy(),
+    "candidate-b": lambda: TrendConfirmedMomentumStrategy(
+        fast_period=5, slow_period=10, macro_period=60, rsi_period=21,
+    ),
+}
 
 
 def _parse_time(value: str | None) -> time | None:
@@ -131,6 +143,15 @@ def register_backtest_parser(commands: argparse._SubParsersAction) -> None:
                  "anything before 2024-10-03, which is Dhan-sourced -- without it those ranges "
                  "return INSUFFICIENT DATA. Never silently on: opt in per run, and label the "
                  "analysis as using reconstructed data.",
+        )
+        sub.add_argument(
+            "--strategy", default="momentum", choices=sorted(STRATEGY_CHOICES),
+            help="Which entry signal to replay. Defaults to 'momentum' (the plain "
+                 "MomentumStrategy) because that was the engine's silent fallback before this "
+                 "flag existed -- changing the default would retroactively alter what older "
+                 "commands meant. Candidate B is 'candidate-b'; passing nothing does NOT give "
+                 "you Candidate B. A mislabelled run caused by exactly this gap is recorded in "
+                 "BACKTEST_FINDINGS.md's 2026-08-26 correction.",
         )
         sub.add_argument(
             "--include-derived", action="store_true",
@@ -298,6 +319,7 @@ def _do_run(args: argparse.Namespace) -> int:
             return 1
         result = run_upstox_backtest(
             archive,
+            strategy=STRATEGY_CHOICES[args.strategy](),
             start=start,
             end=end,
             settings=settings,
@@ -311,6 +333,7 @@ def _do_run(args: argparse.Namespace) -> int:
     else:
         result = run_upstox_backtest(
             archive,
+            strategy=STRATEGY_CHOICES[args.strategy](),
             start=start,
             end=end,
             settings=settings,
@@ -391,6 +414,7 @@ def _do_validate_split(args: argparse.Namespace) -> int:
     def _run(start: date, end: date) -> BacktestResult:
         return run_upstox_backtest(
             archive,
+            strategy=STRATEGY_CHOICES[args.strategy](),
             start=start,
             end=end,
             settings=settings,
