@@ -62,13 +62,25 @@ CANDIDATE_B_TARGET_RETURN = 0.30
 CANDIDATE_B_MINIMUM_OPTION_PREMIUM = 20.0
 CANDIDATE_B_MINIMUM_OPEN_INTEREST = 100_000.0
 
-# Selective short strangle -- confirmed on fresh 2020-2024 data 2026-08-25
-# (12/17 quarters profitable, +67,980 net P&L standalone) and confirmed to
-# combine well with Candidate B (-0.36 daily P&L correlation, combined
-# drawdown barely above Candidate B alone's). Not yet wired into live
-# trading pending this build -- see research/INDEX.md's short-strangle
-# section and BACKTEST_FINDINGS.md's 2026-08-23 selective-deployment entry
-# for the full validation history and exact source of every value below.
+# Selective short strangle -- RETIRED 2026-08-26 by user decision. Do not
+# re-enable without revisiting the two findings below.
+#
+# 1. CAPITAL: a short strangle posts SPAN + exposure margin (roughly
+#    Rs 1.5-2 lakh per lot for NIFTY), not premium. The account this bot
+#    runs against cannot hold even one position. The backtest engine never
+#    modelled margin at all -- flagged in short_premium_backtest.py's own
+#    module docstring -- so every P&L figure this strategy ever produced
+#    silently assumed capital it does not have.
+# 2. EDGE: its 2026-08-25 confirmation (+67,980) was run with fees and
+#    slippage disabled. With real costs the identical 526 trades give
+#    +9,593.50 over four years. See BACKTEST_FINDINGS.md's 2026-08-26
+#    entries and research/CANDIDATE_B_REPRODUCTION_INVESTIGATION.md.
+#
+# The execution path below is left intact and tested rather than deleted:
+# it is real, working code, and the margin problem is a property of the
+# account size rather than of the implementation. SHORT_STRANGLE_RETIRED
+# makes it inert -- flip that one flag to revive it.
+SHORT_STRANGLE_RETIRED = True
 SHORT_STRANGLE_ENTRY_TIME = time(9, 45)
 SHORT_STRANGLE_STRIKE_DISTANCE_PCT = 0.002
 SHORT_STRANGLE_STOP_MULTIPLE = 2.0
@@ -668,7 +680,20 @@ class ConnectionManager:
         combined premium / 50% combined decay) is evaluated on both legs
         together by the paired monitor, not per leg; see
         ShortStrangleParameters' docstring in short_premium_backtest.py.
+
+        Refuses outright while ``SHORT_STRANGLE_RETIRED`` is set -- see that
+        constant's comment for the margin and edge findings behind the
+        2026-08-26 decision. Guarding here rather than at the caller covers
+        every entry point at once (the dashboard's manual proposal and
+        paper_monitor's automatic daily entry both route through this).
         """
+        if SHORT_STRANGLE_RETIRED:
+            raise ConnectionActionError(
+                "Short strangle is retired: a NIFTY strangle needs roughly Rs 1.5-2 lakh of "
+                "SPAN+exposure margin per lot, which this account does not have, and its "
+                "confirmation was run without fees or slippage. See BACKTEST_FINDINGS.md's "
+                "2026-08-26 entries."
+            )
         now = (observed_at or datetime.now(self._settings.timezone)).astimezone(
             self._settings.timezone
         )

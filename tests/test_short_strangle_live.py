@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import options_bot.connections
 from options_bot.config import Settings
 from options_bot.connections import (
     NIFTY_TOKEN,
@@ -111,7 +112,35 @@ def _ready_manager(tmp_path: Path, now: datetime) -> ConnectionManager:
     return manager
 
 
-def test_create_short_strangle_proposal_selects_matching_otm_legs(tmp_path: Path) -> None:
+def _revive(monkeypatch) -> None:
+    """Turn the 2026-08-26 retirement guard off for one test.
+
+    The strangle is retired (see connections.SHORT_STRANGLE_RETIRED) because
+    the account cannot cover its margin, not because the implementation is
+    wrong -- so the execution path is kept working and kept under test. These
+    tests exercise that path directly; the guard itself is covered by
+    test_create_short_strangle_proposal_refuses_while_retired below.
+    """
+    monkeypatch.setattr(options_bot.connections, "SHORT_STRANGLE_RETIRED", False)
+
+
+def test_create_short_strangle_proposal_refuses_while_retired(tmp_path: Path) -> None:
+    """The retirement guard must block every entry point, including a fully
+    valid setup that would otherwise produce a proposal."""
+    now = datetime(2026, 8, 6, 9, 50, tzinfo=IST)
+    manager = _ready_manager(tmp_path, now)
+
+    try:
+        manager.create_short_strangle_proposal(now)
+    except ConnectionActionError as exc:
+        assert "retired" in str(exc).lower()
+        assert "margin" in str(exc).lower()
+    else:
+        raise AssertionError("a proposal was created while the strategy is retired")
+
+
+def test_create_short_strangle_proposal_selects_matching_otm_legs(tmp_path: Path, monkeypatch) -> None:
+    _revive(monkeypatch)
     now = datetime(2026, 8, 6, 9, 50, tzinfo=IST)
     manager = _ready_manager(tmp_path, now)
 
@@ -126,7 +155,8 @@ def test_create_short_strangle_proposal_selects_matching_otm_legs(tmp_path: Path
     assert proposal.call.instrument.token != proposal.put.instrument.token
 
 
-def test_create_short_strangle_proposal_rejects_before_entry_time(tmp_path: Path) -> None:
+def test_create_short_strangle_proposal_rejects_before_entry_time(tmp_path: Path, monkeypatch) -> None:
+    _revive(monkeypatch)
     now = datetime(2026, 8, 6, 9, 30, tzinfo=IST)
     assert now.time() < SHORT_STRANGLE_ENTRY_TIME
     manager = _ready_manager(tmp_path, now)
@@ -139,7 +169,8 @@ def test_create_short_strangle_proposal_rejects_before_entry_time(tmp_path: Path
         raise AssertionError("proposal was created before the configured entry time")
 
 
-def test_create_short_strangle_proposal_rejects_wide_opening_range(tmp_path: Path) -> None:
+def test_create_short_strangle_proposal_rejects_wide_opening_range(tmp_path: Path, monkeypatch) -> None:
+    _revive(monkeypatch)
     now = datetime(2026, 8, 6, 9, 50, tzinfo=IST)
     manager = _ready_manager(tmp_path, now)
     with manager.archive.connect() as con:

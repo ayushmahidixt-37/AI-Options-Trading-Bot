@@ -6,6 +6,22 @@
 
 **Last updated:** 2026-08-26
 
+**2026-08-26 (latest) — short strangle RETIRED by user decision; the project now has no strategy with
+a demonstrated edge.** Retired on capital grounds rather than edge: a NIFTY short strangle posts
+roughly **Rs 1.5-2 lakh of SPAN+exposure margin per lot**, which this account cannot cover, and the
+backtest engine never modelled margin at all (flagged in its own docstring) — so every P&L figure it
+ever produced silently assumed capital that does not exist. The cost finding compounds it (+9,594
+with real costs versus the retracted +67,980 claim). `connections.SHORT_STRANGLE_RETIRED = True` now
+makes `create_short_strangle_proposal` refuse outright, covering both the dashboard's manual proposal
+and `paper_monitor`'s automatic daily entry in one place; the dashboard toggle carries the notice.
+**The execution path was kept, not deleted, and stays under test** (8 tests, one covering the guard,
+three patching it off to keep exercising the real logic) — the implementation is sound and the
+blocker is account size, so reviving it is a one-flag change.
+**Where this leaves the project: Candidate B is the only live-wired strategy and it is Rejected**
+(negative expectancy — 30.4% win rate against a 40.2% break-even). Nothing currently has a
+demonstrated, cost-inclusive, reproducible edge. The next real step is finding one, on the corrected
+foundations now in place (committed verification scripts, real costs, risk-based sizing).
+
 **2026-08-26 (latest) — the short strangle's confirmation is ALSO retracted: it was run with fees and
 slippage disabled. Both "confirmed" strategies are now invalid.** Root cause found and reproduced
 exactly: passing `settings=None` zeroes costs, and doing so regenerates the claimed +67,980.00 to the

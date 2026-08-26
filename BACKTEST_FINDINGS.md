@@ -2678,3 +2678,29 @@ Two observations worth keeping:
 the recent period, versus the Rs 20,000 test where the account died entirely. The constraint at
 Rs 20,000 was capital adequacy; at Rs 1,00,000 the constraint is simply that the strategy has no
 edge.
+
+## 2026-08-26 (fourth entry) — Short strangle RETIRED by user decision
+
+Following the two retractions above, the short strangle is **retired from this project** — not merely
+downgraded. The deciding factor is capital, not edge:
+
+**A short strangle posts SPAN + exposure margin, not premium.** For NIFTY that is roughly
+Rs 1.5-2 lakh *per lot*. The account this bot is being built for cannot hold even one position.
+`short_premium_backtest.py` never modelled margin at all — flagged in its own module docstring —
+so every P&L figure this strategy ever produced silently assumed capital that does not exist.
+No amount of parameter tuning changes that.
+
+The edge finding compounds it: with real fees and slippage the strategy returns +9,593.50 across
+four years and 526 trades, roughly one seventh of the retracted +67,980 claim.
+
+**What was done, and deliberately not done.** `connections.SHORT_STRANGLE_RETIRED = True` now makes
+`create_short_strangle_proposal` refuse outright, which covers every entry point at once (the
+dashboard's manual proposal and `paper_monitor`'s automatic daily entry both route through it). The
+dashboard toggle carries the retirement notice. **The execution path itself was kept, not deleted,
+and stays under test** (8 tests in `tests/test_short_strangle_live.py`, including one covering the
+guard and three that patch it off to keep exercising the real logic): the implementation is correct
+and tested, and the blocker is account size rather than any defect in it. Reviving it is one flag.
+
+Ledger of what remains after this: **Candidate B is the only live-wired strategy, and it is
+Rejected** — negative expectancy, structurally (30.4% win rate against a 40.2% break-even). The
+project currently has no strategy with a demonstrated, cost-inclusive, reproducible edge.
