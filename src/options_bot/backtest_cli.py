@@ -125,6 +125,19 @@ def register_backtest_parser(commands: argparse._SubParsersAction) -> None:
             sub.add_argument("--role", required=True, choices=[r.value for r in UsageRole])
         sub.add_argument("--underlying-key", default=NIFTY_UNDERLYING_KEY)
         sub.add_argument("--timeframe", default="FIVE_MINUTE")
+        sub.add_argument(
+            "--include-dhan", action="store_true",
+            help="Read DhanHQ-reconstructed rows in addition to real Upstox rows. Required for "
+                 "anything before 2024-10-03, which is Dhan-sourced -- without it those ranges "
+                 "return INSUFFICIENT DATA. Never silently on: opt in per run, and label the "
+                 "analysis as using reconstructed data.",
+        )
+        sub.add_argument(
+            "--include-derived", action="store_true",
+            help="Include candles resampled from a finer timeframe (derived_from_timeframe set). "
+                 "Required for the underlying across 2024-10-03..2025-12-31 and for the whole "
+                 "Dhan range, whose FIVE_MINUTE rows were resampled from ONE_MINUTE.",
+        )
 
     check = backtest_commands.add_parser("check-range")
     _common(check)
@@ -291,6 +304,8 @@ def _do_run(args: argparse.Namespace) -> int:
             parameters=parameters,
             underlying_key=args.underlying_key,
             timeframe=args.timeframe,
+            include_dhan=args.include_dhan,
+            include_derived=args.include_derived,
         )
         finalize_test_reservation(archive, reservation, outcome_label=args.outcome_label)
     else:
@@ -302,6 +317,8 @@ def _do_run(args: argparse.Namespace) -> int:
             parameters=parameters,
             underlying_key=args.underlying_key,
             timeframe=args.timeframe,
+            include_dhan=args.include_dhan,
+            include_derived=args.include_derived,
         )
         record_usage(
             archive,
@@ -380,6 +397,8 @@ def _do_validate_split(args: argparse.Namespace) -> int:
             parameters=parameters,
             underlying_key=args.underlying_key,
             timeframe=args.timeframe,
+            include_dhan=args.include_dhan,
+            include_derived=args.include_derived,
         )
 
     test_check = (
@@ -594,6 +613,9 @@ def _do_ml_validate_split(args: argparse.Namespace) -> int:
         return 1
 
     def _run(start: date, end: date) -> BacktestResult:
+        # run_upstox_ml_backtest has no include_dhan parameter -- the ML
+        # engines were built against real Upstox data only. Passing it here
+        # is a TypeError, so only include_derived is threaded through.
         return run_upstox_ml_backtest(
             archive,
             model=model,
@@ -603,6 +625,7 @@ def _do_ml_validate_split(args: argparse.Namespace) -> int:
             parameters=base_params,
             underlying_key=args.underlying_key,
             timeframe=args.timeframe,
+            include_derived=args.include_derived,
         )
 
     test_check = (
