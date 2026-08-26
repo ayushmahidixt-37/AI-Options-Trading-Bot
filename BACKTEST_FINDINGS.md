@@ -2900,3 +2900,78 @@ Twelve seeds reversed that verdict. Two samples cannot distinguish +1 SD from no
 temptation to stop at the encouraging answer is exactly how the retracted confirmations happened.
 **Any future null-hypothesis test in this project should run at least a dozen seeds before its
 verdict is quoted, and the seed count should be stated alongside the result.**
+
+## 2026-08-26 (eighth entry) — Trade post-mortem: the stop is structurally wrong, and rising OI predicts failure
+
+**A diagnostic study rather than a tuning sweep** (`research/trade_postmortem.py`). For every trade
+it walks the selected contract's own candles from entry to the session's force-exit, measuring how far
+the position moved against and for us, and — the question no previous study asked — **what the option
+did after we were already out.** Candidate B, full-year 2021, 5-minute, 530 trades.
+
+### The "stopped out, then it ran" pattern: real, but not fixable by holding
+
+| Stopped-out trades (262 with a post-exit window) | |
+|---|---|
+| Reached ANY profit vs entry after we exited | 149/262 (**57%**) |
+| Reached **>= +10%** vs entry after we exited | 109/262 (**42%**) |
+| Would have ended the session profitable | 68/265 (**26%**) |
+| Median hold-to-close outcome | **-22.7%** |
+
+The intuition is confirmed on its own terms: **42% of stopped trades later touched +10%.** But the fix
+it suggests — hold on, stop cutting them — is wrong. Those spikes are transient: only 26% end the
+session green, and holding every stopped trade to close loses a median 22.7%. The money is visible
+but not capturable without exiting on the spike itself.
+
+### The correctable defect: a fixed-rupee stop whose percentage varies 4x
+
+`stop_distance = (max_loss_per_trade x stop_risk_fraction - fees) / lot_size` is a constant ~Rs 12 per
+unit regardless of what the option costs:
+
+| Option premium | Stop price | Effective stop |
+|---|---|---|
+| 130.93 | 118.93 | **-9.2%** |
+| 84.71 | 72.71 | -14.2% |
+| 63.76 | 51.76 | -18.8% |
+| 38.45 | 26.45 | -31.2% |
+| 29.27 | 17.27 | **-41.0%** |
+
+A cheap option gets a 41% leash; an expensive one gets 9%. Same defect class as the position-sizing
+bug found earlier today — a fixed rupee quantity applied to a proportional instrument.
+
+**The excursion data shows where a consistent stop belongs:**
+
+| MAE (worst dip before exit) | Winners (187) | Losers (343) |
+|---|---|---|
+| median | **-6.0%** | **-15.4%** |
+| dipped past -5% | 58% | **99%** |
+| dipped past -10% | **24%** | **84%** |
+| dipped past -15% | 15% | 52% |
+| dipped past -20% | 7% | 31% |
+
+At **-10%** the separation is sharpest: cutting 84% of losers while sparing 76% of winners. **Not
+adopted on this evidence** — one in-sample year, and the naive arithmetic (45 winners sacrificed
+against 288 losers cut earlier) nets out only marginally positive. Needs dev/val/held-out treatment.
+
+### The strongest lead: rising open interest predicts failure
+
+| Open interest over the trade's life | n | Win rate | Median post-exit MFE |
+|---|---|---|---|
+| **Rising** | 109 | **17%** | +2.2% |
+| Falling / flat | 370 | **38%** | +34.5% |
+
+Trades where OI rose while held won at **17%** versus **38%** — a 2.2x difference, and the *opposite*
+of the naive reading that rising OI confirms a move. Plausible mechanism: rising OI on a long option
+often means fresh writers selling into the move, capping it.
+
+**Caveats before anyone acts on it:** one in-sample year, unequal buckets (109 vs 370), OI measured
+per-contract on 5-minute candles, causality unestablished. A screening observation — exactly the shape
+of thing that has repeatedly failed validation in this log.
+
+### What this changes
+
+Two genuine exit defects (percentage-inconsistent stop; target exits ignoring a +74% median post-exit
+MFE) and one real filter candidate (OI direction). None rescues Candidate B — the null test shows the
+signal is indistinguishable from random and the ~1.44% cost floor dominates. But these are the first
+*structural* defects found rather than parameter preferences, and OI is signal-level rather than
+exit-level. Next step if pursued: test a percentage stop and an OI filter together under
+dev/val/held-out discipline, from a committed script, stating sample counts.
