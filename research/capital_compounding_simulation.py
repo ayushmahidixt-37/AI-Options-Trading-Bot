@@ -45,7 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from datetime import date
+from datetime import date, timedelta
 
 from options_bot.backtest import BacktestParameters
 from options_bot.backtest_cli import _settings_for_archive
@@ -63,6 +63,33 @@ CANDIDATE_B_PARAMS = BacktestParameters(
 )
 CONFIRMED_START = date(2020, 8, 3)
 CONFIRMED_END = date(2024, 10, 1)
+
+
+def _quarter_bounds(start: date, end: date) -> list[tuple[date, date]]:
+    """Split [start, end] into calendar quarters, first/last clipped to the
+    real boundaries -- reproduces BACKTEST_FINDINGS.md's 2026-08-24
+    confirmation exactly (17 quarters, one call each), which is not the
+    same as one continuous range: TrendConfirmedMomentumStrategy's
+    indicators (macro_period=60) need real warmup, and a single pass has
+    it only once at the very start while quarter-by-quarter calls each
+    warm up fresh -- confirmed by direct comparison (single continuous
+    pass: net_pnl=-149,566 over the identical range; the confirmed
+    quarter-by-quarter methodology: +608,962.50). The quarter split is
+    what was actually validated; always fetch trades this way, never as
+    one continuous call."""
+    bounds = []
+    year, quarter_start_month = start.year, ((start.month - 1) // 3) * 3 + 1
+    cursor = date(year, quarter_start_month, 1)
+    while cursor <= end:
+        q_end_month = cursor.month + 2
+        q_end_year = cursor.year + (1 if q_end_month > 12 else 0)
+        q_end_month = ((q_end_month - 1) % 12) + 1
+        next_q_start = date(q_end_year, q_end_month, 1)
+        quarter_end = min(end, next_q_start - timedelta(days=1))
+        quarter_start = max(start, cursor)
+        bounds.append((quarter_start, quarter_end))
+        cursor = next_q_start
+    return bounds
 
 
 def simulate(
@@ -172,16 +199,25 @@ def main(argv: list[str] | None = None) -> int:
     archive.initialize()
     settings = _settings_for_archive(args.archive)
 
-    print(f"running Candidate B's confirmed configuration {args.start} to {args.end} ...", flush=True)
-    result = run_upstox_backtest(
-        archive, strategy=CANDIDATE_B_STRATEGY, start=date.fromisoformat(args.start),
-        end=date.fromisoformat(args.end), settings=settings, parameters=CANDIDATE_B_PARAMS,
-        underlying_key=NIFTY_UNDERLYING_KEY, timeframe="FIVE_MINUTE", include_dhan=True, include_derived=True,
+    print(
+        f"running Candidate B's confirmed configuration {args.start} to {args.end}, "
+        "quarter by quarter (matching the confirmed methodology) ...", flush=True,
     )
-    print(f"  {result.trades} confirmed trades, fixed-1-lot net_pnl={result.net_pnl:.2f}", flush=True)
+    all_trades = []
+    fixed_lot_net_pnl = 0.0
+    for q_start, q_end in _quarter_bounds(date.fromisoformat(args.start), date.fromisoformat(args.end)):
+        result = run_upstox_backtest(
+            archive, strategy=CANDIDATE_B_STRATEGY, start=q_start, end=q_end,
+            settings=settings, parameters=CANDIDATE_B_PARAMS,
+            underlying_key=NIFTY_UNDERLYING_KEY, timeframe="FIVE_MINUTE", include_dhan=True, include_derived=True,
+        )
+        all_trades.extend(result.trade_details)
+        fixed_lot_net_pnl += result.net_pnl
+        print(f"  {q_start}..{q_end}: {result.trades} trades, net_pnl={result.net_pnl:.2f}", flush=True)
+    print(f"  TOTAL {len(all_trades)} confirmed trades, fixed-1-lot net_pnl={fixed_lot_net_pnl:.2f}", flush=True)
 
     outcome = simulate(
-        result.trade_details, args.starting_capital, settings.paper_fee_per_order,
+        all_trades, args.starting_capital, settings.paper_fee_per_order,
         args.max_lots or None, args.position_cap_pct,
     )
 

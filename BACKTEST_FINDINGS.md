@@ -2144,6 +2144,17 @@ itself.
 
 ## 2026-08-24 — Candidate B confirmed on fresh 2020-2024 data
 
+> **RETRACTED 2026-08-26 — THE NUMBERS IN THIS ENTRY ARE INVALID. DO NOT CITE THEM.**
+> Re-running this exact configuration produces **-149,566.00**, not +608,962.50. Twenty-seven
+> exit-parameter configurations were tested; **none** reproduces this table, and the best result any
+> configuration can achieve is roughly a third of what is claimed here. The table's win-rate column
+> and its P&L/profit-factor columns come from two different runs and are mutually exclusive.
+> The trade counts, entries and capital-deployed figures below are correct and do reproduce — only
+> the P&L, profit factor and ROI columns are wrong. Full investigation, including the arithmetic
+> proof and every hypothesis ruled out:
+> `research/CANDIDATE_B_REPRODUCTION_INVESTIGATION.md`. See also the 2026-08-26 entry at the end of
+> this log.
+
 **What changed.** Candidate B (`TrendConfirmedMomentumStrategy`, see `research/INDEX.md`'s
 "Current best candidate") had been stuck at **Open, not Confirmed** since 2026-08-22 for a
 concrete, structural reason: every date range from 2024-10-03 through 2026-08-20 had already
@@ -2482,3 +2493,94 @@ Infrastructure added, independent of the ML rejection: `short_strangle_ml_featur
 re-ran clean against it, 288 passed). `research/models/short-strangle-ml-v1.json` committed for
 reproducibility (small, diffable, weights and metadata only, no raw market data), matching Candidate B's
 `ml-signal-quality-v1.json` precedent even though this one is a negative result.
+
+## 2026-08-26 — Candidate B's confirmation does not reproduce; it is retracted, and the strategy as configured loses money
+
+**This entry retracts the 2026-08-24 "Candidate B confirmed on fresh 2020-2024 data" result.** It was
+found while building a capital-scaling simulation: replaying the confirmed trade sequence produced a
+net loss where the log claimed a large profit. Rather than paper over it, the discrepancy was
+investigated to root cause. Full working:
+`research/CANDIDATE_B_REPRODUCTION_INVESTIGATION.md`.
+
+**What reproduces exactly:** trade counts per quarter (112, 135, 123, 137, 137, 130, 118, 147, 151,
+142, 155, 127, 152, 113, 154 — every quarter checked matches the documented table), entry prices,
+and capital deployed (418,644 vs the 417,410 implied by the documented ROI, a 0.3% gap consistent
+with a slippage setting). **The same signals, the same contracts, the same entries.** The divergence
+is entirely in exit P&L.
+
+**Hypotheses ruled out by direct test, not by reasoning:** settings drift (forced
+`max_loss_per_trade=400`, no change); archive data changing (re-ran against the same-day
+`backups/market-data-20260824.sqlite3` — identical result); quarter-chunked vs continuous ranges
+(real but worth only a few hundred rupees per quarter); engine code changes (`git show faa3629`
+touches only an additive, default-off `dhan_only` scope — with `dhan_only=False` the executed SQL is
+byte-identical, and the exit path is untouched).
+
+**The decisive evidence.** The documented profit factor pins gross win/loss exactly. For
+2020-Q3-partial (112 trades, 30.4% = 34 wins, PF 1.68, +24,335): gross win 60,122, gross loss 35,787
+-> average win 1,768, average loss 459, reward:risk **3.85**. A 12-cell trailing-stop grid found a
+configuration matching those per-trade economics to within **one rupee** —
+`stop_risk_fraction=1.6, target_return=None, trailing_stop=0.30, trailing_activation_return=0.20`
+gives average win **1,769** and average loss **458** — but it produces **25 winners, not 34**.
+Applying the documented row's own 34/78 split to those matched averages: 34 x 1,769 - 78 x 458 =
+**+24,422**, i.e. the documented +24,335. **The documented P&L is one run's per-trade economics
+carried by a different run's win count.** Notably, trailing stops are recorded as tested and *not
+adopted* in this same log (2026-08-23), so the parameter line printed beside the table does not
+describe whatever produced it.
+
+**Confirmed unreachable.** A third grid swept `stop_risk_fraction` in {1.6, 2.0, 2.8, 4.0, 6.0} x
+`target_return` in {None, 0.30, 0.60} — 27 configurations in total across the three grids. Every one
+obeys the same trade-off with no exception:
+
+| Regime | Win rate | Average win | Net P&L |
+|---|---|---|---|
+| Capped winners (`target_return` set) | 25.0% - 35.7% | 742 - 1,577 | **negative in all 10 cells** |
+| Uncapped winners (`target_return=None`) | 21.4% - 25.0% | 2,044 - 2,193 | +4,996 to **+7,774 (best of 27)** |
+
+Raising the win rate requires capping winners, which mechanically shrinks the average win. **No
+configuration produces 34 wins at ~1,768 average — the documented columns are mutually exclusive**,
+and the best achievable net is roughly a third of what was claimed.
+
+**What the strategy actually does, and why it is structural.** The documented parameter line
+(`stop_risk_fraction=1.6, target_return=0.30`) — which is also exactly what is wired into live paper
+trading via the `CANDIDATE_B_*` constants in `connections.py` — gives **-13,551.00** on 2020-Q3
+partial and **-149,566.00** across 2020-08-03..2024-10-01. Independent arithmetic confirms this is
+forced, not bad luck: a 30% profit cap against a fixed ~Rs 640 stop is a reward:risk of ~1.49, which
+needs a **40.2%** win rate to break even (`1/(1+R)`); the strategy delivers **30.4%**. Per-trade
+expectancy = 0.304 x 22.5pts - 0.696 x 12pts = **-1.51 points per trade**.
+
+**Immediate consequence: Candidate B is enabled for automatic paper entries in a configuration that
+loses money on every historical period tested.** The live-trading boundary is untouched
+(`LIVE_TRADING_ENABLED=false` — no real money was ever at risk), but the auto-entry toggle should be
+reconsidered on this evidence. The best configuration found (+7,774) is **not** a recommendation: it
+is the winner of a 27-cell search on one window, exactly the overfitting this project's dev/val/fresh
+discipline exists to reject.
+
+**Process failure this exposes.** Neither this confirmation nor the short strangle's was produced by
+a committed, re-runnable script — both were run ad hoc with only their output pasted into this log.
+That is the direct reason a wrong number survived two days and took a multi-grid investigation to
+diagnose instead of a one-line diff. **Every future confirmation must be produced by a committed
+script** (as `research/train_short_strangle_ml_model.py`,
+`research/capital_compounding_simulation.py` and `research/one_month_sizing_analysis.py` now are), so
+any number in this log can be regenerated on demand. The short strangle's own confirmation
+(+67,980) was produced the same ad-hoc way and **has not been re-verified** — it should be treated as
+suspect until it is.
+
+### Position sizing: a separate real defect found the same day
+
+`research/one_month_sizing_analysis.py` (2020-08-03..2020-08-31, 52 trades, Rs 1,00,000 start):
+
+| Regime | Final | Return | Lots min/avg/max | Max drawdown |
+|---|---|---|---|---|
+| FIXED 1 lot (the live setting) | 92,273 | -7.73% | 1 / 1.0 / 1 | 10,062 |
+| ROLLING (sized by affordable premium) | 40,804 | **-59.20%** | **3 / 10.4 / 28** | **91,372** |
+
+Both took all 52 trades — Rs 1,00,000 is ample, nothing was skipped for capital. But sizing by
+affordability (`lots = balance x cap% / premium`) is backwards: lot count scales *inversely* with
+premium while the stop is a **fixed rupee distance per lot**, so cheap options received the largest
+risk allocation. A premium-29 option took 28 lots and lost Rs 16,742 in one trade; a premium-100
+option took 4 lots and lost Rs 2,390 — a 7x swing in rupees actually risked, driven purely by
+option price rather than by any risk decision. **Correct rule: size by risk, not affordability** —
+`lots = per_trade_risk_budget / (stop_distance x lot_size)`, giving a steady ~3 lots at Rs 1,00,000
+risking 2%, instead of swinging 3-28. This must be fixed before further capital-scaling work, though
+it does not rescue a negative-expectancy strategy: sizing governs how fast such a system loses, not
+whether it does.

@@ -4,7 +4,32 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-25
+**Last updated:** 2026-08-26
+
+**2026-08-26 (latest) — Candidate B's confirmation is RETRACTED: it does not reproduce, and the
+strategy as configured loses money.** Found while building a Rs 1,00,000 capital-scaling simulation:
+replaying the confirmed trade sequence gave a net loss where the log claimed +608,962.50. Investigated
+to root cause rather than papered over. The trade counts, entries and capital deployed all reproduce
+*exactly* — the divergence is entirely in exit P&L. Ruled out by direct test: settings drift, archive
+data changes (re-ran against the same-day backup), quarter-chunking, and engine code changes. The
+decisive finding: the documented profit factor pins average win/loss at 1,768/459, which a
+trailing-stop config reproduces to within **one rupee** — but that config yields 25 winners, not the
+34 the table claims. **The documented P&L is one run's per-trade economics carried by a different
+run's win count.** 27 configurations were then swept; none reproduces the table, and the best net any
+of them achieves (+7,774) is about a third of what was claimed. Re-running the documented parameter
+line — which is exactly what is wired into live paper trading — gives **-149,566 over 2020-2024**.
+Independent arithmetic confirms it is structural, not bad luck: a 30% profit cap against a fixed
+~Rs 640 stop needs a **40.2%** win rate to break even; the strategy delivers **30.4%**.
+**Consequence: Candidate B is enabled for automatic paper entries in a money-losing configuration**
+(live trading itself remains disabled — no real money was ever at risk — but the auto-entry toggle
+should be reconsidered). Also found: the naive "rolling capital" sizing rule is itself wrong — it
+sizes by affordability, so cheap options got the *largest* risk (a premium-29 option took 28 lots and
+lost Rs 16,742 in one trade vs Rs 2,390 for a premium-100 option); correct rule is to size by risk.
+**Process failure this exposes:** neither this confirmation nor the short strangle's was produced by a
+committed script, which is why a wrong number survived two days. Every future confirmation must be.
+**The short strangle's own confirmation (+67,980) was produced the same ad-hoc way and has not been
+re-verified — treat it as suspect until it is.** Full working:
+`research/CANDIDATE_B_REPRODUCTION_INVESTIGATION.md` and BACKTEST_FINDINGS.md's 2026-08-26 entry.
 **2026-08-25 (latest, later) — an ML entry filter for the short strangle was rejected on fresh data, and that
 same fresh check surfaced a more urgent problem: the already-confirmed manual filter itself lost money on the
 most recent 17.5 months.** Built a day-level ML entry filter (`short_strangle_ml_features.py` + a `ml_model`
