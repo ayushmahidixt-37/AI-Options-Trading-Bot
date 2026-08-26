@@ -2704,3 +2704,66 @@ and tested, and the blocker is account size rather than any defect in it. Revivi
 Ledger of what remains after this: **Candidate B is the only live-wired strategy, and it is
 Rejected** — negative expectancy, structurally (30.4% win rate against a 40.2% break-even). The
 project currently has no strategy with a demonstrated, cost-inclusive, reproducible edge.
+
+## 2026-08-26 (fifth entry) — Exit-shell hypothesis REJECTED: the edge was never there to throw away
+
+**Testing the one lead left after Candidate B was rejected.** The retraction investigation found a
+consistent pattern across 27 exit configurations on a single window: every variant that *capped*
+winners lost money, while every variant that let winners run was net positive (+4,996 to +7,774).
+That raised a real question — is the entry signal finding something the 30% profit target throws
+away? Tested properly this time via a committed script (`research/exit_shell_study.py`) with the
+dev/val/held-out split fixed **before** any result was looked at. Entry signal, contract selection
+and all entry filters held pinned throughout; only the exit shell varied.
+
+**Phase 1 — Development (2021-01-01..2022-12-31, 1,096 trades).** The hypothesis looked strong:
+
+| Exit shell | Win rate | Net P&L | PF |
+|---|---|---|---|
+| **uncapped (no target)** | 23.8% | **+58,970.00** | 1.12 |
+| trail 0.40 act 0.30 | 25.5% | +38,149.00 | 1.08 |
+| trail 0.40 act 0.20 | 25.2% | +34,686.50 | 1.07 |
+| trail 0.40 | 25.0% | +33,755.00 | 1.07 |
+| target=0.80 | 26.1% | +6,344.50 | 1.01 |
+| trail 0.30 act 0.20 | 25.9% | +6,936.50 | 1.02 |
+| trail 0.30 | 25.2% | +5,111.00 | 1.01 |
+| target=0.50 | 28.8% | -800.50 | 1.00 |
+| **baseline target=0.30** | 34.8% | **-40,352.00** | 0.91 |
+| trail 0.20 | 24.9% | -115,519.50 | 0.69 |
+
+Uncapped beat the baseline by nearly Rs 100,000 on this window, exactly as the hypothesis predicted.
+
+**Phase 2 — Validation (2023-01-01..2024-10-01, 1,037 trades). The ranking inverted completely:**
+
+| Exit shell | Win rate | Net P&L | PF | Dev rank -> Val rank |
+|---|---|---|---|---|
+| **baseline target=0.30** | 34.4% | **-89,972.00** | 0.76 | worst-but-one -> **best** |
+| uncapped (no target) | 19.8% | -122,879.50 | 0.72 | **best** -> worst-but-two |
+| trail 0.40 act 0.30 | 22.1% | -135,795.75 | 0.67 | 2nd -> 3rd |
+| trail 0.40 act 0.20 | 22.0% | -135,911.00 | 0.67 | 3rd -> **worst** |
+
+The development winner became the validation loser and the development loser became the validation
+winner. That is the textbook signature of fitting noise, and it is why the shortlist was chosen on
+development alone rather than on the whole dataset.
+
+**Phase 3 — Held-out (2026-06-01..2026-08-20, 124 trades), one shot:**
+
+| Exit shell | Win rate | Net P&L | PF |
+|---|---|---|---|
+| uncapped (the candidate) | 20.2% | **-24,027.75** | 0.60 |
+| baseline (reference) | 25.8% | -3,086.70 | 0.95 |
+
+**Verdict: REJECTED.** The candidate is worse than the baseline on validation *and* on held-out, and
+negative on both. Not adopted.
+
+**The more important conclusion, which goes beyond this hypothesis.** Every configuration tested —
+all ten shells, on both validation and held-out — **loses money**. The baseline is merely the
+least-bad. The development window's positive results (up to +58,970) do not survive contact with any
+other period. This is not an exit-shell problem that better exits could fix: **Candidate B's entry
+signal does not produce a tradeable edge, and there is nothing for a smarter exit to preserve.**
+Even the best development result was marginal on its own terms (profit factor 1.12, ROI 1.11%) —
+the kind of number that a single favourable window produces by chance.
+
+Combined with the retraction entries above, the position is unambiguous: **Candidate B is Rejected
+on entry logic, not on exit tuning, and no further parameter work on it is warranted.** Any future
+effort should go to finding a genuinely different signal, tested from the start under the corrected
+foundations now in place (committed scripts, real costs, risk-based sizing, honest range accounting).

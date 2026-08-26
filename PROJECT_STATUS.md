@@ -6,6 +6,25 @@
 
 **Last updated:** 2026-08-26
 
+**2026-08-26 (latest) — exit-shell hypothesis REJECTED, and Candidate B's auto-entry is now OFF.**
+Two follow-ups completed. (1) **Auto-entry disabled**: `auto_paper_enabled` set to false and the
+dashboard restarted so it also picks up the strangle retirement guard, which the running process
+predated. Found while doing it that the **short strangle had actually placed two live paper trades
+at 10:18 today** (both SELL legs, one trade group) before its toggle was switched off — they remain
+open and will force-exit normally, since the retirement guard deliberately blocks new entries only,
+never exits. (2) **Exit-shell study** (`research/exit_shell_study.py`, committed, dev/val/held-out
+fixed before looking at results): the "let winners run" lead looked strong on development
+(uncapped +58,970 vs baseline -40,352) but **the ranking inverted completely on validation** — the
+development winner became the validation loser (-122,880) and the development loser became the
+validation best (-89,972). Held-out (2026-06..08) confirmed it: candidate -24,028 vs baseline
+-3,087. **Rejected.** The larger conclusion matters more than the hypothesis: **every one of the ten
+exit shells loses money on both validation and held-out** — the baseline is merely least-bad. This
+is not an exit problem a smarter exit could fix; **Candidate B's entry signal has no tradeable edge,
+so there is nothing for a better exit to preserve.** No further parameter work on Candidate B is
+warranted. Any future effort should go to a genuinely different signal, tested from the start under
+the corrected foundations (committed scripts, real costs, risk-based sizing, honest range
+accounting).
+
 **2026-08-26 (latest) — short strangle RETIRED by user decision; the project now has no strategy with
 a demonstrated edge.** Retired on capital grounds rather than edge: a NIFTY short strangle posts
 roughly **Rs 1.5-2 lakh of SPAN+exposure margin per lot**, which this account cannot cover, and the
