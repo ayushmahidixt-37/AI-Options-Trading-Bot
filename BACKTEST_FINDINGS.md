@@ -2767,3 +2767,60 @@ Combined with the retraction entries above, the position is unambiguous: **Candi
 on entry logic, not on exit tuning, and no further parameter work on it is warranted.** Any future
 effort should go to finding a genuinely different signal, tested from the start under the corrected
 foundations now in place (committed scripts, real costs, risk-based sizing, honest range accounting).
+
+## 2026-08-26 (sixth entry) — Candidate B on genuine 1-minute data: no rescue, and a hard cost floor quantified
+
+**Why this was worth testing.** The findings log records the 1-minute archive as "never read directly
+by any backtest engine", and `range_usage` is scoped per timeframe, so ONE_MINUTE was genuinely
+unmined. It is also 5.8x more observations rather than the same data re-run — the one honest way to
+add information after the FIVE_MINUTE work was exhausted. Enabled by adding `--include-dhan` /
+`--include-derived` to the backtest CLI (previously it could not reach anything before 2024-10-03).
+
+**A data caveat found first, by counting rows per trading day:**
+
+| Timeframe | Source | Rows/day | Verdict |
+|---|---|---|---|
+| ONE_MINUTE | dhan, 2020-08-03..2024-10-01 | **433** | genuine 1-minute |
+| ONE_MINUTE | upstox, 2024-10-03..2026-08-20 | 74.8 | the documented mislabelled 5-minute data |
+| FIVE_MINUTE | dhan | 74.5 | correct |
+
+So real 1-minute underlying data exists **only** for the Dhan range (452,096 candles, 1,044 days).
+
+**Full-year 2021, identical configuration, only the timeframe differs:**
+
+| | ONE_MINUTE | FIVE_MINUTE |
+|---|---|---|
+| Trades | 3,755 | 696 |
+| Win rate | 28.0% | 33.2% |
+| Net P&L | **-214,666.50** | **-54,046.50** |
+| Fees paid | 150,200.00 | 27,840.00 |
+| Profit factor | 0.771 | 0.790 |
+| Capital deployed | 15,951,194.50 | 2,935,642.00 |
+| Return on capital | -1.35% | -1.84% |
+
+**Finer granularity does not rescue the strategy.** Profit factor is essentially unchanged (0.771 vs
+0.790) — the signal has the same non-predictive character at both resolutions. It is not that the
+5-minute view was discarding information the 1-minute view recovers; there is no edge at either.
+
+**The genuinely useful number this produced — a cost floor.** Stripping fees out to see the raw
+signal:
+
+| | ONE_MINUTE | FIVE_MINUTE |
+|---|---|---|
+| Gross P&L before fees | -64,466.50 | -26,206.50 |
+| **Gross return on capital** | **-0.40%** | **-0.89%** |
+| Fee drag per rupee deployed | 0.94% | 0.95% |
+
+Both are negative *before* costs, so the strategy fails on its own merits. But note the fee drag is
+**~0.95% of capital deployed at both timeframes** — it does not get worse per rupee on 1-minute; the
+absolute loss grows only because 1-minute turns over 5.4x more capital. Interestingly 1-minute is
+marginally *less* bad on a return-on-capital basis (-1.35% vs -1.84%).
+
+**Actionable constraint for anything built next: at Rs 20/order, any strategy on this instrument
+needs a gross edge above roughly 0.95% of capital deployed per round trip just to break even on
+costs.** Candidate B delivers -0.40% to -0.89%. That is the size of the gap a replacement signal has
+to close, and it is a far more useful design target than "is this profitable".
+
+**Status: 1-minute is not rejected as a research direction** — it remains 452,096 genuinely unmined
+candles with a fresh ledger scope. What is rejected, again, is Candidate B's entry signal, now at a
+second independent granularity.
