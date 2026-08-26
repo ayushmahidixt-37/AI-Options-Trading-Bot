@@ -59,8 +59,16 @@ $env:OPTIONS_BOT_WEB_PASSWORD = (Get-Content $PasswordFile -Raw).Trim()
 New-Item -ItemType Directory -Force -Path (Split-Path $LogFile) | Out-Null
 
 Write-Output "$(Get-Date -Format o): Starting dashboard for trading day $todayStr..."
+# Start-Process -ArgumentList joins its array into one command-line string
+# without quoting individual elements that contain spaces -- unlike calling
+# an exe directly with &. $ConfigFile ("D:\Claude DND\local-bot.env") has a
+# space in it, so it must carry its own embedded quote characters here or it
+# silently splits into two arguments (caught 2026-08-26: the scheduled task
+# ran and reported success every day, but argparse received the second half
+# of the path as its positional "command" argument and the dashboard never
+# actually started -- see logs/dashboard-daily.log.err).
 Start-Process -FilePath $PythonExe `
-    -ArgumentList "-u", "-m", "options_bot.cli", "--config", $ConfigFile, "web", "--host", "127.0.0.1", "--port", "$Port" `
+    -ArgumentList "-u", "-m", "options_bot.cli", "--config", "`"$ConfigFile`"", "web", "--host", "127.0.0.1", "--port", "$Port" `
     -WorkingDirectory $RepoDir `
     -WindowStyle Hidden `
     -RedirectStandardOutput $LogFile `
