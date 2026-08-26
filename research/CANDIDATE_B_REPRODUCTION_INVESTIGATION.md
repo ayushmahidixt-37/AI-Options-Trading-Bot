@@ -1,6 +1,50 @@
-# Candidate B reproduction investigation (opened 2026-08-26)
+# Confirmation reproduction investigation (opened 2026-08-26)
 
-**Status: OPEN — do not trust Candidate B's documented 2020-2024 confirmation numbers until this closes.**
+**Status: BOTH confirmed strategies fail to reproduce. Neither Candidate B's nor the short
+strangle's documented 2020-2024 confirmation numbers can be regenerated.**
+
+## Summary of both failures
+
+Re-verified with committed scripts (`research/verify_short_strangle_confirmation.py`, and the
+grids described below for Candidate B). Both show the same signature — **the trade sequence
+reproduces exactly, the P&L does not**:
+
+| Strategy | Trades claimed | Trades actual | Net P&L claimed | Net P&L actual |
+|---|---|---|---|---|
+| Candidate B | 2,388 | **2,388** (match) | +608,962.50 | **-149,566.00** |
+| Short strangle | 526 | **526** (match) | +67,980.00 (12/17 quarters) | **+9,593.50** (9/17 quarters) |
+
+That both engines — written months apart, sharing no exit code — produce identical trade counts but
+inflated P&L points at the *reporting* step rather than at any strategy logic. See each section
+below for the specific mechanism found.
+
+## Short strangle: ROOT CAUSE FOUND — the confirmation was run with costs disabled
+
+`research/verify_short_strangle_confirmation.py --no-costs` passes `settings=None` to the engine,
+which zeroes fees and slippage (`slippage = settings.paper_slippage_bps/10_000 if settings else 0.0`,
+same for `fee`). That run reproduces the documented claim **exactly, to the rupee**:
+
+| Run | Quarters profitable | Net P&L |
+|---|---|---|
+| **Documented claim (2026-08-25)** | 12/17 | **+67,980.00** |
+| Re-run with `settings=None` (no fees, no slippage) | **12/17** | **+67,980.00** — exact match |
+| Re-run with real configured costs | 9/17 | **+9,593.50** |
+
+**The short strangle's confirmation was an idealised, cost-free run.** A short strangle pays four
+orders per trade (sell two legs, buy two back), so at the configured Rs 20/order that is Rs 80 of
+fees per trade before slippage on four legs. Across 526 trades, **real trading costs consume 86% of
+the claimed profit** — reducing +67,980 to +9,594.
+
+The strategy is *not* worthless: it is still net positive (+9,594) and still profitable in 9 of 17
+quarters after costs. But its true edge is roughly one seventh of what the log claims, and at
+Rs 9,594 over four years it is thin enough that it cannot carry the "confirmed, ready to deploy"
+label it was given.
+
+**Additionally — and not modelled anywhere:** a short strangle requires SPAN + exposure margin, not
+premium. `short_premium_backtest.py`'s own module docstring flags this as unmodelled. Real margin
+for a short NIFTY strangle runs roughly Rs 1.5-2 lakh per lot, so **an Rs 1,00,000 account cannot
+hold even one strangle position**, whatever the backtest P&L says. Any capital-scaling work on this
+strategy must model margin first.
 
 Candidate B is currently the only strategy wired into live paper trading. Its confirmation
 (`BACKTEST_FINDINGS.md`, "2026-08-24 — Candidate B confirmed on fresh 2020-2024 data") reports
@@ -14,6 +58,7 @@ produces **-149,566.00 over the same 2,388 trades**. This file records the inves
 | Settings drift (`MAX_LOSS_PER_TRADE` raised 400→700 for live) | Forced `max_loss_per_trade=400` explicitly | No change. Standalone scripts already get the 400 default — `_settings_for_archive` reads `os.environ`, not `local-bot.env`, unless the CLI merged it first |
 | Archive data changed since the confirmation | Re-ran against `backups/market-data-20260824.sqlite3` (same-day backup) | Identical -13,551.00 for 2020-Q3-partial. Data is not the cause |
 | Quarter-by-quarter vs one continuous range | Compared both for all 17 quarters | Real but tiny (a few hundred rupees/quarter, from indicator warm-up at each quarter boundary). Nowhere near the discrepancy |
+| Costs disabled (`settings=None`) — the mechanism that explains the strangle | Ran Candidate B with `settings=None` | 112 trades, 25.9% win, **+13,710** — not the documented 30.4% / +24,335. Note `settings=None` also disables the stop entirely (`if settings and stop > 0`), so this is the no-stop/no-target/no-cost ceiling. **Still only 56% of the claim.** Rules this mechanism out for Candidate B |
 | Engine code changed since confirmation | `git show faa3629 -- src/options_bot/upstox_backtest.py` | Only change is the additive, default-off `dhan_only` scoping + IV filter. With `dhan_only=False`, `option_source_clause == source_clause`, so the executed SQL is byte-identical. Exit logic untouched. `strategy_experimental.py` untouched since the confirmation |
 | Entry filters differ | Compared trade counts per quarter | **Trade counts match the documented table EXACTLY for every quarter checked** (112, 135, 123, 137, 137, 130, 118, 147, 151, 142, 155, 127, 152, 113, 154). Same signals, same contract selection |
 | Entry prices / lot size differ | Compared `capital_deployed_total` against the doc's own ROI column | 418,644 (mine) vs 417,410 (implied by doc's +5.83% ROI) — within 0.3%, consistent with a slippage-setting difference only |

@@ -6,6 +6,26 @@
 
 **Last updated:** 2026-08-26
 
+**2026-08-26 (latest) — the short strangle's confirmation is ALSO retracted: it was run with fees and
+slippage disabled. Both "confirmed" strategies are now invalid.** Root cause found and reproduced
+exactly: passing `settings=None` zeroes costs, and doing so regenerates the claimed +67,980.00 to the
+rupee. With real costs the same 526 trades give **+9,593.50** (9/17 quarters, not 12/17) — a strangle
+pays four orders per trade, and **real costs consume 86% of the claimed profit**. Unlike Candidate B
+this strategy is *not* rejected: it stays net positive after costs, so it is downgraded
+Confirmed -> **Open**, with roughly one seventh of the claimed edge. Also confirmed:
+`settings=None` does **not** explain Candidate B (cost-free gives +13,710 vs the claimed +24,335), so
+the two failures have different mechanisms — Candidate B's remains "two runs' columns merged".
+**Answering the original Rs 1,00,000 question on verified numbers, with correct risk-based sizing
+(2% of balance per trade):** 2020-2024 -> Rs 31,766 (**-68.2%**); the most current data,
+2025-03..2026-08 -> Rs 63,525 (**-36.5%**). Rs 1,00,000 is ample capital (only 25 of 662 recent
+trades skipped) — the constraint is that the strategy has no edge, not the account size. Risk-based
+sizing is materially less destructive than the naive affordability rule (-68% vs -99%), so that fix
+is worth keeping regardless. **Margin note:** a short strangle posts SPAN+exposure margin (~Rs 1.5-2
+lakh/lot), not premium — so **Rs 1,00,000 cannot hold even one strangle position**; margin must be
+modelled before any capital work on that strategy. All verification now runs from committed scripts
+(`research/verify_short_strangle_confirmation.py`, `research/capital_compounding_simulation.py`,
+`research/one_month_sizing_analysis.py`).
+
 **2026-08-26 (latest) — Candidate B's confirmation is RETRACTED: it does not reproduce, and the
 strategy as configured loses money.** Found while building a Rs 1,00,000 capital-scaling simulation:
 replaying the confirmed trade sequence gave a net loss where the log claimed +608,962.50. Investigated

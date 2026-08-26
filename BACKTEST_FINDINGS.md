@@ -2349,6 +2349,16 @@ for Candidate B) required no additional data work for this check.
 
 ## 2026-08-25 — Short strangle re-confirmed on the 2020-2024 fresh range; combined-portfolio check with Candidate B run for real
 
+> **RETRACTED 2026-08-26 — the +67,980 figure in this entry was produced with fees and slippage
+> DISABLED.** With real configured costs the same 526 trades give **+9,593.50** and 9/17 profitable
+> quarters, not 12/17. Root cause confirmed by exact reproduction: passing `settings=None` (which
+> zeroes fees and slippage) regenerates +67,980.00 to the rupee. Real costs consume 86% of the
+> claimed profit. The strategy is downgraded from Confirmed to **Open** — still net positive after
+> costs, but with roughly one seventh of the claimed edge. The combined-portfolio correlation numbers
+> below inherit the same inflated P&L series and must be re-derived before use. See the 2026-08-26
+> entries at the end of this log and
+> `research/CANDIDATE_B_REPRODUCTION_INVESTIGATION.md`.
+
 **Direct follow-up, same methodology as ORB above.** The selective short strangle (`strike_distance_pct=0.002,
 stop_multiple=2.0, target_fraction=0.5`, opening-range filtered, `exclude_expiry_day=True`) was run across the
 same 17 quarters of the 2020-2024 DhanHQ backfill. Unlike ORB, it held up: **12 of 17 quarters profitable, net
@@ -2584,3 +2594,87 @@ option price rather than by any risk decision. **Correct rule: size by risk, not
 risking 2%, instead of swinging 3-28. This must be fixed before further capital-scaling work, though
 it does not rescue a negative-expectancy strategy: sizing governs how fast such a system loses, not
 whether it does.
+
+## 2026-08-26 (second entry) — Short strangle's confirmation also retracted: it was run with fees and slippage disabled
+
+**Follow-up to the retraction above, done immediately because the same ad-hoc process produced both
+numbers.** Re-verified with a committed script this time
+(`research/verify_short_strangle_confirmation.py`), so this result can be regenerated on demand.
+
+**Root cause found, and it reproduces exactly.** The engine treats `settings=None` as "no costs"
+(`slippage = settings.paper_slippage_bps/10_000 if settings else 0.0`, likewise `fee`). Running the
+documented configuration that way reproduces the 2026-08-25 claim **to the rupee**:
+
+| Run | Trades | Quarters profitable | Net P&L |
+|---|---|---|---|
+| **Documented claim** | 526 | 12/17 | **+67,980.00** |
+| Re-run, `settings=None` (no fees, no slippage) | 526 | **12/17** | **+67,980.00** — exact |
+| Re-run, real configured costs | 526 | **9/17** | **+9,593.50** |
+
+**The short strangle's confirmation was an idealised, cost-free run.** A strangle pays four orders
+per trade (sell two legs, buy two back) — Rs 80 in fees at the configured Rs 20/order, before
+slippage on four legs. Across 526 trades **real costs consume 86% of the claimed profit.**
+
+| Quarter | Trades | Win rate | Net P&L (real costs) | PF |
+|---|---|---|---|---|
+| 2020-Q3 (partial) | 18 | 77.8% | -2,857.00 | 0.73 |
+| 2020-Q4 | 17 | 70.6% | +4,137.50 | 1.64 |
+| 2021-Q1 | 21 | 57.1% | -1,257.50 | 0.91 |
+| 2021-Q2 | 26 | 61.5% | +2,024.50 | 1.18 |
+| 2021-Q3 | 39 | 64.1% | +1,606.50 | 1.10 |
+| 2021-Q4 | 24 | 58.3% | -7,210.50 | 0.68 |
+| 2022-Q1 | 17 | 58.8% | +8,527.00 | 2.11 |
+| 2022-Q2 | 20 | 60.0% | +1,855.50 | 1.19 |
+| 2022-Q3 | 26 | 53.8% | -9,922.50 | 0.47 |
+| 2022-Q4 | 35 | 60.0% | -2,434.50 | 0.85 |
+| 2023-Q1 | 31 | 54.8% | -19.50 | 1.00 |
+| 2023-Q2 | 43 | 65.1% | +373.50 | 1.03 |
+| 2023-Q3 | 48 | 75.0% | +12,308.00 | 2.06 |
+| 2023-Q4 | 42 | 57.1% | -18,141.50 | 0.50 |
+| 2024-Q1 | 34 | 67.7% | -5,871.00 | 0.83 |
+| 2024-Q2 | 39 | 79.5% | +15,419.75 | 2.70 |
+| 2024-Q3 (partial) | 46 | 78.3% | +11,055.25 | 2.05 |
+| **Total** | **526** | — | **+9,593.50** | — |
+
+**Verdict: downgraded from Confirmed to Open, not Rejected.** Unlike Candidate B, this strategy is
+still genuinely net positive after real costs (+9,593.50, profitable in 9 of 17 quarters). But its
+true edge is roughly one seventh of what was claimed, and Rs 9,594 spread over four years is too
+thin to carry a "confirmed, ready to deploy" label. The 2026-08-25 fresh-range result (-4,817 over
+2025-03..2026-08) now reads consistently with this: a thin edge that real costs can flip negative.
+
+**Margin remains unmodelled, and it is decisive at small account sizes.** A short strangle posts
+SPAN + exposure margin rather than paying premium — flagged as unmodelled in
+`short_premium_backtest.py`'s own docstring. Real margin for a short NIFTY strangle runs roughly
+Rs 1.5-2 lakh per lot, so **an Rs 1,00,000 account cannot hold even one strangle position.** Any
+capital-scaling work here must model margin first.
+
+## 2026-08-26 (third entry) — What Rs 1,00,000 of real rolling capital actually produces
+
+The question that started this whole investigation, now answered on verified numbers with correct
+risk-based sizing (`research/capital_compounding_simulation.py --sizing risk --risk-pct 0.02`,
+each trade risking 2% of the *current* balance rather than sizing by what the balance can afford —
+see the sizing defect recorded in the first 2026-08-26 entry).
+
+| Period | Start | End | Return | Max drawdown | Trades taken |
+|---|---|---|---|---|---|
+| 2020-08 .. 2024-10 (the retracted "confirmed" range) | 1,00,000 | **31,766** | **-68.2%** | 1,04,691 | 1,897 (450 skipped) |
+| 2025-03 .. 2026-08 (most current data) | 1,00,000 | **63,525** | **-36.5%** | 63,930 | 637 (25 skipped) |
+
+Both periods lose money, which is the expected consequence of the negative per-trade expectancy
+established above — sizing governs how fast a negative-expectancy system loses, not whether it does.
+
+Two observations worth keeping:
+
+- **Risk-based sizing is materially less destructive than the naive rule** (-68.2% vs -98.9% on the
+  same 2020-2024 sequence), confirming the sizing fix is real and worth keeping even though it does
+  not rescue the strategy.
+- **The recent period has a distinct shape**: a severe first six months (1,00,000 -> 37,925 by
+  2025-08, -62%) followed by twelve months that were mildly *positive* overall (37,925 -> 63,525).
+  Whether that reflects a genuine regime change or is noise on a thin sample is exactly the kind of
+  question that needs a proper fresh-range confirmation — run from a committed script — before
+  anyone acts on it.
+
+**Rs 1,00,000 is ample capital for Candidate B** — only 25 of 662 trades were skipped for capital in
+the recent period, versus the Rs 20,000 test where the account died entirely. The constraint at
+Rs 20,000 was capital adequacy; at Rs 1,00,000 the constraint is simply that the strategy has no
+edge.

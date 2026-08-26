@@ -98,7 +98,27 @@ def simulate(
     fee_per_order: float,
     max_lots: int | None,
     position_cap_pct: float,
+    sizing: str = "affordability",
+    risk_pct: float = 0.02,
 ) -> dict:
+    """Replay a trade sequence against one rolling account balance.
+
+    ``sizing`` selects how many lots each trade takes:
+
+    ``"affordability"`` -- as many lots as ``position_cap_pct`` of the
+    balance can buy. **This rule is wrong and is kept only to reproduce the
+    2026-08-26 finding that exposed it**: lot count scales *inversely* with
+    premium while the stop is a fixed rupee distance per lot, so cheap
+    options receive the largest risk allocation (a premium-29 option took 28
+    lots and lost Rs 16,742 in one trade, versus Rs 2,390 for a premium-100
+    option at 4 lots). See BACKTEST_FINDINGS.md's 2026-08-26 entry.
+
+    ``"risk"`` -- the correct rule: size so each trade risks a constant
+    fraction of the balance, ``lots = (balance * risk_pct) / risk_per_lot``,
+    where ``risk_per_lot`` is that trade's own distance to its stop times
+    the lot size, plus fees. Still bounded by what the balance can actually
+    afford in premium, since a long option is paid for upfront.
+    """
     balance = starting_capital
     peak = balance
     max_drawdown = 0.0
@@ -111,7 +131,13 @@ def simulate(
         if premium_per_lot <= 0:
             continue
         affordable_lots = int((balance * position_cap_pct) // premium_per_lot)
-        lots = min(affordable_lots, max_lots) if max_lots else affordable_lots
+        if sizing == "risk":
+            risk_per_lot = max(0.01, (trade.entry_price - trade.stop_price) * lot_size + 2 * fee_per_order)
+            risk_lots = int((balance * risk_pct) // risk_per_lot)
+            lots = min(risk_lots, affordable_lots)
+        else:
+            lots = affordable_lots
+        lots = min(lots, max_lots) if max_lots else lots
         if lots < 1:
             skipped += 1
             trade_events.append(
@@ -190,6 +216,16 @@ def main(argv: list[str] | None = None) -> int:
              "premium, even if affordable -- a deliberate diversification choice this "
              "script makes, not a previously-validated parameter.",
     )
+    parser.add_argument(
+        "--sizing", choices=("affordability", "risk"), default="risk",
+        help="'risk' (default, correct): each trade risks --risk-pct of the balance. "
+             "'affordability': legacy rule kept only to reproduce the 2026-08-26 finding "
+             "that showed it allocates the most risk to the cheapest options.",
+    )
+    parser.add_argument(
+        "--risk-pct", type=float, default=0.02,
+        help="Fraction of the current balance risked per trade under --sizing risk.",
+    )
     parser.add_argument("--start", default=CONFIRMED_START.isoformat())
     parser.add_argument("--end", default=CONFIRMED_END.isoformat())
     parser.add_argument("--out", default=None)
@@ -219,10 +255,13 @@ def main(argv: list[str] | None = None) -> int:
     outcome = simulate(
         all_trades, args.starting_capital, settings.paper_fee_per_order,
         args.max_lots or None, args.position_cap_pct,
+        sizing=args.sizing, risk_pct=args.risk_pct,
     )
 
     print(
-        f"\nStarting capital: {outcome['starting_capital']:.2f}\n"
+        f"\nSizing mode:      {args.sizing}"
+        + (f" ({args.risk_pct * 100:.1f}% of balance risked per trade)" if args.sizing == "risk" else "")
+        + f"\nStarting capital: {outcome['starting_capital']:.2f}\n"
         f"Final balance:    {outcome['final_balance']:.2f}\n"
         f"Total return:     {outcome['total_return_pct']:.2f}%\n"
         f"Max drawdown:     {outcome['max_drawdown']:.2f}\n"
