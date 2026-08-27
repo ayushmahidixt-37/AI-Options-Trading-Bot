@@ -213,6 +213,19 @@ class BacktestParameters:
     trailing_activation_return: float | None = None
     minimum_opening_range_pct: float | None = None
     opening_range_bars: int = 6
+    # Percentage-of-premium stop, added 2026-08-26. When set it REPLACES the
+    # fixed-rupee stop derived from stop_risk_fraction (they are two ways of
+    # answering the same question, so stacking them is meaningless).
+    #
+    # Motivated by a real measurement, not a guess: research/trade_postmortem.py
+    # found the fixed-rupee stop fires at a median MAE of -17.0%, while winners
+    # reach a median MAE of only -6.0% and losers -15.4%. The two distributions
+    # separate sharply -- 84% of losers dip past -10% but only 24% of winners
+    # ever do -- so the current stop sits well past the level that discriminates.
+    # A fixed rupee budget also produces wildly different percentage leashes
+    # depending on premium (a Rs 29 option gets -41%, a Rs 131 option -9%),
+    # which is an arithmetic accident rather than a risk decision.
+    stop_loss_pct: float | None = None
     minimum_implied_volatility: float | None = None
     maximum_implied_volatility: float | None = None
 
@@ -310,14 +323,20 @@ def run_momentum_backtest(
             buy_fill = round(float(entry[1]) * (1 + slippage), 2)
             units = int(contract[1])
             fees = 2 * settings.paper_fee_per_order if settings else 0.0
-            has_stop_cap = settings and variant.stop_risk_fraction is not None
-            risk_budget = (
-                settings.max_loss_per_trade * variant.stop_risk_fraction
-                if has_stop_cap
-                else float("inf")
-            )
-            stop_distance = (risk_budget - fees) / units if has_stop_cap else float("inf")
-            stop = round(buy_fill - stop_distance, 2) if has_stop_cap else 0.0
+            if variant.stop_loss_pct is not None:
+                # Percentage stop replaces the fixed-rupee one -- see
+                # BacktestParameters.stop_loss_pct for why.
+                has_stop_cap = True
+                stop = round(buy_fill * (1 - variant.stop_loss_pct), 2)
+            else:
+                has_stop_cap = settings and variant.stop_risk_fraction is not None
+                risk_budget = (
+                    settings.max_loss_per_trade * variant.stop_risk_fraction
+                    if has_stop_cap
+                    else float("inf")
+                )
+                stop_distance = (risk_budget - fees) / units if has_stop_cap else float("inf")
+                stop = round(buy_fill - stop_distance, 2) if has_stop_cap else 0.0
             selected_exit = path[-1]
             exit_price = float(selected_exit[4])
             exit_reason = "max-hold" if timed_exit else (

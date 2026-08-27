@@ -3033,3 +3033,78 @@ With this rejected, **no entry filter, exit shell, granularity, or ML variant te
 has produced a cost-inclusive edge that survives out-of-sample.** The remaining defensible work is
 the percentage-based stop (a correctness fix, not an edge claim) and a redesign around the ~1.44%
 round-trip cost floor.
+
+## 2026-08-26 (tenth entry) — Walk-forward ML: real signal in-sample, REJECTED on the pre-registered test
+
+**The sixth and final lead of the day, and the one designed so its answer would be conclusive.**
+`research/ml_walkforward.py`. Five prior leads had each looked strong on a discovery window and
+reversed on the next, so this was built to settle whether *any* model, trained only on the past and
+judged only on the future, adds value: walk-forward splits (never random), strictly pre-entry
+features, no threshold sweep (fixed top 25/50/75% cuts, nothing to tune), and every fold scored as
+an Rs 1,00,000 rolling account with real costs. Two features were added from today's own findings:
+the contract's premium level, and the percentage leash the fixed-rupee stop implies at that premium.
+
+### Stage 1: walk-forward looked genuinely promising
+
+| Fold | Baseline | ML top 25% | ML top 50% | ML top 75% |
+|---|---|---|---|---|
+| test 2022 | +21.6% | +17.5% | **+48.6%** | +23.1% |
+| test 2023 | -45.0% | **+14.0%** | -23.5% | -15.3% |
+| test 2024 | -66.8% | **+5.4%** | -13.3% | -39.9% |
+
+Eight of nine cells beat the baseline, and the top-25% cut turned two disastrous years into positive
+ones. The pre-registered bar ("beat baseline in every fold") nonetheless **failed at 2/3** — 2022's
+top-25% returned +17.5% against a +21.6% baseline.
+
+### Stage 2: the confound, and a control that it survived
+
+Taking 25% of trades pays 25% of the costs. On a negative-expectancy strategy that improves results
+by itself, with no predictive skill whatsoever. A control was added: 40 random same-size draws per
+cell. **The model beat the random median in 8 of 9 cells, averaging 32/40 where chance is 20/40**,
+with three cells clearly outside the random band. The gain was therefore *not* merely "trade less" —
+the score carried real information.
+
+**But that control was added after seeing the walk-forward result.** Declaring success on a test
+invented post hoc is precisely the practice that produced this project's two retracted
+confirmations. So the finding was labelled a live hypothesis, not an adopted result, and given one
+clean shot with the criterion fixed in writing beforehand.
+
+### Stage 3: the pre-registered test — REJECTED
+
+Criterion, fixed before running: *train 2021-2024, test once on 2025-03..2026-08 (never seen by this
+model); ML top-25% must **both** beat the baseline **and** beat >=90% of random same-size draws.*
+
+| | Return | vs baseline | vs 40 random draws |
+|---|---|---|---|
+| baseline (no filter) | **+37.3%** | — | — |
+| **ML top 25%** (pre-registered) | **+13.3%** | **loses** | **26/40 (65%)** |
+| ML top 50% | +61.2% | beats | 33/40 (83%) |
+| ML top 75% | +65.3% | beats | 35/40 (88%) |
+
+**Both criteria failed, and no cut cleared the 90% random bar** — not even the two that beat the
+baseline. This is not a near-miss on a technicality: nothing survived the control. The in-sample
+signal from Stage 2 did not persist. **Rejected. Not adopted.**
+
+### A real inconsistency found in this script, recorded rather than quietly fixed
+
+This run analysed 316 trades for 2025+, while the earlier Rs 1,00,000 study over roughly the same
+window used 662. Cause: `build_rows` passes `include_derived=True` to the backtest but its own
+feature-extraction query filters `derived_from_timeframe IS NULL`, so trades signalled on a
+resampled candle are silently dropped. It does **not** affect the verdict above (ML, baseline and
+random all ran on the identical 316 trades), but it means this entry's "+37.3% baseline" is **not**
+comparable to the 2026-08-26 capital study's "-36.5%". Fix before reusing this script.
+
+### Where this leaves the project
+
+Six leads tested today, six rejected out-of-sample: exit shell, ML filter, 1-minute granularity, OI
+entry filter, percentage stop, walk-forward ML. Every one looked real on its discovery window. Three
+were additionally killed by a random-selection control that the discovery analysis had not applied.
+
+**The signal-search approach on this dataset is exhausted.** That is a finding, not a failure of
+effort: the patterns available here do not persist across windows, and no model can learn a pattern
+that is not stable. Further filter/parameter/model search on Candidate B is not warranted, and any
+result it produced would now carry a prior of roughly zero given six-for-six.
+
+What remains defensible is a change of foundation rather than of tuning: a different instrument or
+edge source, or a structure with few enough round trips to clear the ~1.44% cost floor. Those are
+different projects, and honest ones. What is not defensible is another filter.
