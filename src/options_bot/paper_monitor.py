@@ -406,6 +406,28 @@ class PaperPositionMonitor:
                     errors.append(f"Strangle {group_id[:8]}: Telegram exit alert failed")
             except (ConnectionActionError, RuntimeError, ValueError) as exc:
                 errors.append(f"Strangle {group_id[:8]}: {exc}")
+                # A short position that cannot be quoted cannot be exited --
+                # every leg is quoted before any exit condition is evaluated,
+                # so a quote failure skips the force-exit check entirely. Found
+                # in production 2026-08-27: a dashboard restart does not restore
+                # the Angel One connection, so a live short strangle sat open
+                # through its force-exit time and overnight, silently, while the
+                # monitor retried every 15 seconds. A long position failing this
+                # way merely stalls with capped downside; a short one keeps
+                # accumulating unbounded risk, so it must never fail quietly.
+                if self.application.clock.force_exit_due(now):
+                    alarm = (
+                        f"UNEXITED SHORT POSITION: strangle {group_id[:8]} is past its "
+                        f"force-exit time and could not be closed ({exc}). "
+                        f"Reconnect the broker and close it manually."
+                    )
+                    self.application.ledger.record_event(
+                        now.isoformat(), "CRITICAL", "strangle_force_exit_failed", alarm
+                    )
+                    try:
+                        self.connections.send_alert(alarm)
+                    except Exception:
+                        pass
         return closed, actions, errors, quotes
 
     def _maybe_auto_short_strangle_entry(self, now: datetime) -> str | None:
