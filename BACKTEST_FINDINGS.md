@@ -3181,3 +3181,73 @@ Two methodological lessons worth carrying forward, both earned here:
    reason the ten-trade artifact was caught rather than reported as a validated result.
 2. **A headline out-of-sample number means nothing until it is decomposed by period.** +71.3% and
    "2 of 6 quarters profitable" describe the same trades.
+
+## 2026-08-27 — RSI conviction band: diagnosed from a losing day, and the first candidate to survive a controlled test
+
+**Method that produced it is the point.** Rather than searching parameters, this came from dissecting
+a single bad day. `research/day_comparison.py` isolated 2021-03-02 (worst rolling-capital day of
+2021), and `research/day_anatomy.py` asked why:
+
+```
+NIFTY open 14,885.90  high 14,959.10  low 14,760.80  close 14,944.30
+day range 1.34%   net move +0.39%   trailing 20-day mean range 1.35%
+```
+
+A completely ordinary range that finished where it started -- chop, not volatility. Six signals
+fired, every one reversing the last:
+
+| Time | Signal | RSI | Conf | Gap | Reversed |
+|---|---|---|---|---|---|
+| 11:10 | BEARISH | 45.9 | 0.54 | - | - |
+| 11:45 | BULLISH | 53.7 | 0.54 | 35m | YES |
+| 12:05 | BEARISH | 47.0 | 0.53 | 20m | YES |
+| 12:15 | BULLISH | 53.8 | 0.54 | 10m | YES |
+| 12:45 | BEARISH | 45.1 | 0.55 | 30m | YES |
+| 13:40 | BULLISH | 54.1 | 0.54 | 55m | YES |
+
+**Every RSI reading sat between 45.1 and 54.1** -- no conviction in either direction -- and the
+strategy's own confidence metric read a flat ~0.54 throughout, completely blind to being whipsawed.
+All six lost, ~653 each, because the stop is a fixed rupee budget.
+
+`BacktestParameters` already had `bullish_rsi_min`/`bearish_rsi_max`, an earlier era of this project
+found "Strict RSI 55/45 + ATR floor 20" was its best hand-tuned candidate, and **the 86-config sweep
+never touched these thresholds** -- a real hole in what was claimed as a comprehensive search.
+
+### Five independent windows, each with a 200-draw random same-size control
+
+| Window | Baseline P&L | RSI 60/40 | Win% base->RSI | PF base->RSI | vs random |
+|---|---|---|---|---|---|
+| 2020-08..2020-12 | -16,842 | **+5,510** | 34.7 -> **59.1** | 0.81 -> **1.94** | **98.5th** |
+| 2021 | -22,180 | **+6,392** | 35.3 -> **42.6** | 0.89 -> **1.33** | 92.5th |
+| 2022 | -17,408 | **+11,222** | 34.5 -> **38.2** | 0.92 -> **1.51** | **98.0th** |
+| 2023-01..2024-10 | -89,972 | -3,997 | 34.4 -> **38.6** | 0.76 -> **0.88** | 74.0th |
+| 2025-03..2026-08 | -67,066 | **+13,469** | 23.1 -> **28.8** | 0.80 -> **1.43** | **100th** |
+
+**Win rate and profit factor improved in 5 of 5 windows; raw P&L positive in 4 of 5.** Five-window
+mean percentile 92.6 against a null of 50 -- roughly 3.3 SD, p ~ 0.0005.
+
+**The cost confound does not explain it.** A filter keeping ~10% of trades pays ~10% of the costs,
+which would leave per-trade P&L unchanged. Instead per-trade P&L reversed sign (2021: -41.8 ->
++118.4; 2025-26: -98.5 -> +204.1), and win rate improved in every window -- costs do not decide
+whether a trade wins.
+
+### Why this is still labelled Open, not Confirmed
+
+1. **It failed the bar set in advance** (95th percentile in *every* window): 92.5th and 74.0th miss.
+2. **60/40 was selected after seeing results.** The diagnosis pointed at 55/45, and on the 2020
+   window that rule scored the **49.0th percentile -- pure chance**. Only the stricter band works.
+   There is a coherent mechanism (55/45 still admits low-conviction signals) but the selection is
+   post-hoc and cannot be argued away.
+3. **Thin samples**: 22-83 trades per window, with wide random distributions.
+4. Still lost money on the 2023-2024 window.
+
+### Practical shape, stated plainly
+
+RSI 60/40 takes roughly **one trade every four or five sessions**. Even if the edge is real, this is
+a low-frequency system with a modest edge -- not a passive-income engine. It is worth running to
+learn from, not worth funding an account on.
+
+**Recommended next step is forward paper, not more backtesting.** Every window in this archive has
+now been touched by something; the dataset is used up, and no further backtest here can resolve the
+two caveats above. Three months of forward paper would produce 15-20 trades that nobody could have
+overfit, which is the only remaining honest test.
