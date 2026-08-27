@@ -3108,3 +3108,76 @@ result it produced would now carry a prior of roughly zero given six-for-six.
 What remains defensible is a change of foundation rather than of tuning: a different instrument or
 edge source, or a structure with few enough round trips to clear the ~1.44% cost floor. Those are
 different projects, and honest ones. What is not defensible is another filter.
+
+## 2026-08-27 — Systematic global parameter sweep (86 configs): REJECTED, plus a metric artifact worth remembering
+
+**Run because the criticism was fair.** Six individual hypotheses had been tested, but a broad,
+systematic sweep of the parameter space had never been run under the corrected methodology.
+`research/parameter_sweep.py` (committed, reusable, CLI-configurable grids) does it in stages:
+indicator periods (54 combos) -> exit shell (20) -> entry filters (12), each stage feeding only its
+winner forward, all on development 2021 alone. Validation 2022 saw only finalists; held-out
+2023-2024 and final 2025-2026 saw one configuration, once.
+
+**Champion found:** `fast=8 slow=21 macro=90 rsi=21` + **no stop, no target** + `min_premium=20`.
+Notable because *no stop at all* had never been tested -- the exit-shell study varied targets while
+keeping the stop, the stop study varied the stop's style. On a bought option this is coherent: max
+loss is the premium regardless, so the stop only ever forced exits on noise.
+
+### A metric artifact that nearly produced a false positive
+
+The sweep's Rs 1,00,000 column initially showed the champion at **+4.3%**. It also showed a config
+with **raw P&L of -83,216** scoring **+4.5%** on the same account. Two metrics disagreeing on
+direction is a lie somewhere, and checking found it:
+
+| Config | Backtest trades | **Actually taken** | Skipped |
+|---|---|---|---|
+| live + current stop | 681 | 270 | 60% |
+| live + NO stop | 681 | **12** | **98%** |
+| champion + NO stop | 442 | **10** | **98%** |
+
+**The champion's "+4.3%" was ten trades.** With no stop, `stop_price=0`, so risk-based sizing
+correctly treats the entire premium (~Rs 4,875/lot) as the per-trade risk -- 4.9% of a Rs 1,00,000
+account, which a 2%-risk rule rightly refuses. **This is not a harness bug.** The sizing was telling
+the truth: *a no-stop configuration is not tradeable at Rs 1,00,000 under conservative risk
+discipline.* That is a real constraint on the strategy, and the earlier reading of it as a defect
+was wrong.
+
+### Fair evaluation at one lot per trade, and the quarterly check that settles it
+
+| | Held-out 2023-2024 | Final 2025-2026 |
+|---|---|---|
+| live config (current) | Rs 29,009 (-71.0%) | Rs 77,520 (-22.5%) |
+| **champion** | Rs 60,178 (**-39.8%**) | Rs 1,71,280 (**+71.3%**) |
+
+The +71.3% does not survive decomposition:
+
+| Quarter | Trades | Win rate | Raw P&L | PF |
+|---|---|---|---|---|
+| 2025-Q2 (partial) | 124 | 30.6% | -5,396 | 0.97 |
+| 2025-Q3 | 72 | 36.1% | -7,479 | 0.88 |
+| 2025-Q4 | 29 | 51.7% | +10,361 | 1.46 |
+| **2026-Q1** | 84 | 34.5% | **+54,584** | 1.49 |
+| 2026-Q2 | 83 | 37.3% | -13,376 | 0.86 |
+| 2026-Q3 (partial) | 39 | 35.9% | -149 | 0.99 |
+| **Total** | **431** | — | **+38,544** | — |
+
+**Two of six quarters profitable, and removing 2026-Q1 alone turns +38,544 into -16,040.** One
+quarter is the entire result. Combined with a 39.8% loss on held-out, this is not an edge.
+
+**Verdict: REJECTED.** The champion is genuinely *less bad* than the live configuration on every
+window measured -- which is real information, and says the current live parameters are poor -- but
+"less bad" is not tradeable.
+
+### What this settles
+
+Parameter tuning has now been tested the way it should have been from the start: systematically,
+across 86 configurations, with selection and evaluation windows separated, scored as a real account.
+**It does not rescue this strategy.** That is a stronger and more useful negative than the six
+individual rejections that preceded it, because it rules out the whole class rather than six
+instances of it.
+
+Two methodological lessons worth carrying forward, both earned here:
+1. **When two metrics disagree about direction, one is lying** -- that inconsistency was the only
+   reason the ten-trade artifact was caught rather than reported as a validated result.
+2. **A headline out-of-sample number means nothing until it is decomposed by period.** +71.3% and
+   "2 of 6 quarters profitable" describe the same trades.
