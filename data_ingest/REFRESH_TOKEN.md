@@ -15,36 +15,32 @@ HTTP 401 DH-901: "Client ID or user generated access token is invalid or expired
 `DHAN_APP_ID` and `DHAN_APP_SECRET` do **not** expire this way (12 months) and do
 not need touching.
 
-## The 3 steps
+## The proven path: Dhan's own web console
 
-1. **Generate a consent ID.**
-   `GET https://api.dhan.co/v2/app/generate-consent?client_id=<DHAN_CLIENT_ID>`
-   with header `app_id: <DHAN_APP_ID>`, `app_secret: <DHAN_APP_SECRET>`. Returns
-   a `consentId`.
-
-2. **Log in and approve.**
-   Open `https://auth.dhan.co/consent-login?consentId=<consentId>` in a browser,
-   sign into your Dhan account, approve the request. This is the step that must
-   be a human — it's your account credentials.
-
-3. **Consume the consent for a token.**
-   `GET https://api.dhan.co/v2/app/consumeApp-consent?tokenId=<consentId>` with
-   the same `app_id`/`app_secret` headers. Returns `accessToken` — this is the
-   new `DHAN_ACCESS_TOKEN`.
-
-Paste it into `credentials.env`:
+This is what actually worked on 2026-08-28. Log into your Dhan account, go to
+the API/Trading APIs section of your profile, and generate a fresh access
+token there directly. Paste it into `credentials.env`:
 
 ```
-DHAN_ACCESS_TOKEN=<the new accessToken>
+DHAN_ACCESS_TOKEN=<the new token>
 ```
 
-## Do this in a browser or curl, not by asking Claude to automate it
+This step is irreducibly manual — it's your account login, and nothing in this
+repo should ever hold that password.
 
-Step 2 needs your login inside a real browser session. Nothing in
-`options_bot` wraps steps 1 or 3 either — there's no existing helper for this
-flow in the codebase, so doing it manually via `curl`/Postman/browser is the
-straightforward path today. (A small script wrapping steps 1 and 3 would be
-easy to add if this becomes routine — say so if you want it.)
+## `dhan_consent.py` — do not trust this yet
+
+An earlier version of this doc described a 3-step `generate-consent` /
+`consent-login` / `consumeApp-consent` API flow and a script
+(`dhan_consent.py`) to automate the two non-login steps of it. **Testing it
+returned `HTTP 404` on `/v2/app/generate-consent`** — those exact endpoint
+paths were written from general recollection of Dhan's Partner API shape, not
+verified against Dhan's actual current documentation, and they are wrong (at
+least the path; possibly also the method or headers).
+
+Don't use `dhan_consent.py` until someone checks Dhan's real docs and fixes
+the endpoints — it will just fail with a 404 the same way. The web-console
+route above is confirmed working; use that.
 
 ## After refreshing
 
