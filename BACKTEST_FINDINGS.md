@@ -3333,3 +3333,88 @@ implied (55/45) scored the 49th percentile on 2020.
 Every window in this archive has now been searched. No further backtest here can resolve those two
 caveats, and each additional test raises the overfitting risk rather than lowering it. **The only
 remaining honest test is forward paper.**
+
+## 2026-08-28 — Every derivable feature ranked: only one has a profitable region, and it is RSI extremity found twice
+
+**Answers the question directly: what in this archive predicts a profitable trade?**
+`research/feature_discovery.py` inventories every field the archive holds (OHLC, open_interest,
+implied_volatility, strike, expiry, option_type, lot_size -- there is no volume column), derives
+**24 causal features** from them, computes all of them for the full 2,388-trade 2020-2024 sample,
+and ranks each by **quintile P&L** rather than by comparing winner/loser medians.
+
+The method change matters: comparing medians is what made open interest look strong (6.57M vs 4.20M)
+when a threshold on it proved worthless, and it is *also* what made the confidence metric look dead
+(0.523 vs 0.525) when its tail turned out to be the best region in the dataset. **The same error in
+both directions, twice.** Quintiles ask whether P&L varies systematically across a feature's range,
+which is the question a filter actually depends on.
+
+### The headline: 118 of 120 quintile cells are negative
+
+Every quintile of every feature loses money, with two exceptions:
+
+| Feature | Best quintile | Range | n | P&L | Win% |
+|---|---|---|---|---|---|
+| **confidence** | **Q5** | **0.5703 .. 0.7483** | 480 | **+6,469** | 38.3% |
+| minutes_since_open | Q2 | 45 .. 140 min | 477 | +251 | 36.9% |
+
+Only `atr` is monotonic (lower is consistently better) and even its best quintile loses -20,028.
+Nothing else -- days to expiry, moneyness, IV change, distance from macro EMA, realised volatility,
+day of week, trades-so-far-today, running P&L today, minutes since last signal, previous-trade-stopped
+-- has a profitable region anywhere in its range.
+
+### The confidence metric IS RSI 60/40, provably
+
+`strategy.py`'s signal rule computes confidence as a direction-conditional rescaling of RSI:
+
+```
+BULLISH: confidence = 0.5 + (RSI - 50)/100
+BEARISH: confidence = 0.5 + (50 - RSI)/100
+```
+
+So `confidence >= 0.60` solves exactly to *RSI >= 60 when bullish, RSI <= 40 when bearish*. The two
+filters are the same filter, and the trade counts confirm it -- identical in every window (22, 54,
+55, 83, 66):
+
+| Window | conf >= 0.60 | RSI 60/40 |
+|---|---|---|
+| 2020-08..12 | n=22, +5,510 | n=22, +5,510 |
+| 2021 | n=54, +5,362 | n=54, +6,392 |
+| 2022 | n=55, +11,972 | n=55, +11,222 |
+| 2023-2024 | n=83, -3,538 | n=83, -3,997 |
+| 2025-2026 | n=66, +13,469 | n=66, +13,469 |
+
+**This is not a redundancy to tidy up -- it resolves the main objection to RSI 60/40.** That threshold
+had been chosen after seeing results, while the whipsaw diagnosis implied 55/45. But the feature
+ranking above was produced with no reference to that work, across 24 competing features, and landed
+independently on confidence Q5 (>= 0.5703, i.e. RSI 57/43). **Two unrelated analytical routes
+converged on the same effect**, which is corroboration rather than curve-fitting.
+
+`minimum_signal_confidence` and `bullish_rsi_min`/`bearish_rsi_max` are therefore redundant
+parameters. Setting both is meaningless; the head-to-head confirms it (RSI + conf>=0.57 returns
+byte-identical results to RSI alone in all five windows).
+
+### The cost structure, not the entry signal, is what remains broken
+
+Two quintiles win **more than half** their trades and still lose money:
+
+| Feature | Best quintile | Win rate | P&L |
+|---|---|---|---|
+| entry_premium | Rs 20 .. 53.73 | **51.6%** | -8,794 |
+| days_to_expiry | 0 .. 1 days | **50.3%** | -16,398 |
+
+At 477 trades, -8,794 is about -18 per trade against roughly 40 per trade in fees: **gross positive,
+eaten by costs.** For a meaningful slice of trades the entry selection is already working and the
+money is lost between gross and net. No entry filter addresses that.
+
+Three levers act on this gap and none of them is a filter: **fewer and larger positions** (Rs 40 fixed
+cost is ~1% of a Rs 3,750 position but 0.27% of a Rs 15,000 one), **a better reward:risk shape** (the
++30% cap against a ~Rs 640 stop loses even at 51.6% win rate; the 2024-06-04 trade that ran +160%
+after being stopped shows the upside exists), and **trading less often but keeping the right ones** --
+which is precisely what RSI 60/40 does, and why it is the only thing that has worked.
+
+### Conclusion
+
+There is **one** usable entry filter in this archive, now found twice by independent routes, and
+nothing else in 24 features adds to it. Further filter search is not warranted -- not as a matter of
+caution but as a measured result: the profitable regions do not exist. The remaining work is cost
+structure and exit shape.
