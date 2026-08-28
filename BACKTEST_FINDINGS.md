@@ -3418,3 +3418,62 @@ There is **one** usable entry filter in this archive, now found twice by indepen
 nothing else in 24 features adds to it. Further filter search is not warranted -- not as a matter of
 caution but as a measured result: the profitable regions do not exist. The remaining work is cost
 structure and exit shape.
+
+## 2026-08-28 — Exit shape rejected; position size is the real lever, and the drawdowns are survivable
+
+**Two levers remained after filters were exhausted. One works, one does not.**
+`research/exit_and_sizing_study.py` and `research/equity_curve_analysis.py`.
+
+### Exit shape: rejected, and the method is why
+
+Nine exit shapes were tested on the **full 2,388-trade baseline** rather than on RSI 60/40's 22-83
+trades per window -- choosing among nine variants on 22 trades would fit noise, and tuning the exit
+alongside the filter would let the two selections contaminate each other. Uncapped and trailing
+exits looked best on the baseline (3/5 windows positive against the current shape's 0/5), but the
+pattern is a regime split, not an edge:
+
+| Exit shape | 2020 | 2021 | 2022 | 2023-2024 | 2025-2026 |
+|---|---|---|---|---|---|
+| tgt none (uncapped) | +10,661 | +538 | **+59,196** | **-122,880** | **-100,198** |
+| stop2.5 trail0.40 act0.30 | +7,904 | +30,915 | **+43,216** | **-126,408** | **-124,930** |
+
+Applied to RSI 60/40's trades it **makes things worse**: 4/5 windows positive falls to 3/5 and total
+P&L drops from +32,596 to +3,422. **Not adopted.** Had the exit been tuned on the filtered trades
+directly it would have looked like an improvement; selecting it independently on the large sample is
+what exposed it.
+
+### Position size: the equity path, which a final balance hides
+
+| Risk/trade | Final | Return | Peak | Lowest ever | **Max DD %** | Worst streak | Trades to recover |
+|---|---|---|---|---|---|---|---|
+| 1% | 147,050 | +47% | 148,255 | 97,539 | **10.5%** | 14 | 32 |
+| 2% | 380,398 | +280% | 387,427 | 93,471 | **22.8%** | 14 | 49 |
+| 4% | 1,114,782 | +1,015% | 1,156,755 | 87,208 | **43.2%** | 14 | 51 |
+| 6% | 1,475,634 | +1,376% | 1,539,156 | 81,376 | **59.6%** | 14 | 69 |
+| 10% | 2,130,261 | +2,030% | 2,523,950 | 80,675 | **75.9%** | 14 | **never** |
+
+**A correction to what was argued before these numbers existed.** It was claimed the 10% level would
+leave the account "wiped out" or "under 2 lakh". That is wrong. The lowest balance ever reached at
+*any* risk level is Rs 80,675 -- the account never approaches ruin, because the large drawdowns occur
+at large balances (at 10% the fall is 25.2 lakh -> 6.1 lakh, not to zero). Rupee drawdown was being
+read as if it were proximate to ruin; the percentage-of-peak and lowest-balance columns show it is
+not. The concern was directionally right and quantitatively overstated.
+
+What the columns do establish: **10% never recovers its peak** and gives up 75.9% of everything
+accumulated. 2% (22.8% drawdown, recovers in 49 trades) is ordinary for an equity strategy. 4%
+(43.2%, recovers in 51 trades) is aggressive but within what many professionals run.
+
+**The worst losing streak is 14 consecutive trades at every risk level** -- the same sequence, scaled.
+At roughly 47 trades a year that is about three and a half months of uninterrupted losses, which is
+the real psychological test rather than any single drawdown figure.
+
+2022 month by month at 2%: 139,214 -> 218,272 with six losing months, none worse than -8,872. The
+same year at 10%: 426,924 -> 1,089,356 with single months of -167,690 and -100,171.
+
+### What actually constrains sizing
+
+Not the drawdown -- **the edge is still Open, not Confirmed.** Sizing multiplies whatever the edge
+truly is. At 4% a real edge compounds to +1,015%; an overfit one loses capital four times faster than
+at 1%. The uncertainty about the edge, not the shape of the equity curve, is what caps responsible
+size. Six years of data does not resolve it, because RSI 60/40 was *found* by searching those six
+years; only trades taken after the rule existed can.
