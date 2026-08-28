@@ -460,12 +460,25 @@ def resample_dhan_options_to_five_minute(
 ) -> tuple[int, int]:
     """Resample every Dhan-sourced 1-minute option contract to 5-minute bars.
 
-    Open interest is preserved as the last value seen within each 5-minute
-    bucket -- candle_resample.resample_candles/Candle don't carry OI at all
-    (a deliberately narrow, widely-shared utility not worth widening for
-    this one caller), and Candidate B's minimum_open_interest=100000 filter
-    needs a real value here or every trade would be silently rejected as
-    "no OI data" once resampled. Returns (contracts_processed, candles_saved).
+    Open interest is preserved as the LAST value seen within each 5-minute
+    bucket -- it's a snapshot/level, not a flow, so the most recent reading
+    is the correct one to carry forward. candle_resample.resample_candles/
+    Candle don't carry OI at all (a deliberately narrow, widely-shared
+    utility not worth widening for this one caller), and Candidate B's
+    minimum_open_interest=100000 filter needs a real value here or every
+    trade would be silently rejected as "no OI data" once resampled.
+
+    Volume is preserved as the SUM of the five 1-minute values in each
+    bucket, not the last -- it's a flow (contracts traded during the
+    interval), so summing gives the real 5-minute volume while taking the
+    last minute's value would silently discard the other four fifths of the
+    interval's activity. Added 2026-08-28 alongside the fetch/retry-path fix
+    for the same field -- that fix alone was incomplete, since the strategy
+    reads FIVE_MINUTE bars and this resample is what produces them; every
+    prior resample of this dataset produced 0% volume coverage despite the
+    1-minute source rows carrying real values.
+
+    Returns (contracts_processed, candles_saved).
     """
     now = observed_at or datetime.now(IST)
     with archive.connect() as con:
@@ -479,7 +492,7 @@ def resample_dhan_options_to_five_minute(
     for index, token in enumerate(tokens):
         with archive.connect() as con:
             rows = con.execute(
-                """SELECT symbol, started_at, open, high, low, close, open_interest
+                """SELECT symbol, started_at, open, high, low, close, open_interest, volume
                    FROM market_candles WHERE instrument_token=? AND source='dhan' AND timeframe='ONE_MINUTE'
                    ORDER BY started_at""",
                 (token,),
@@ -495,15 +508,22 @@ def resample_dhan_options_to_five_minute(
             if _within_session(datetime.fromisoformat(r[1]))
         ]
         last_oi_by_bucket: dict[datetime, float] = {}
+        volume_sum_by_bucket: dict[datetime, float] = {}
         for r in rows:
             ts = datetime.fromisoformat(r[1])
-            if r[6] is not None and _within_session(ts):
-                last_oi_by_bucket[_bucket_start(ts, 5)] = float(r[6])
+            if not _within_session(ts):
+                continue
+            bucket = _bucket_start(ts, 5)
+            if r[6] is not None:
+                last_oi_by_bucket[bucket] = float(r[6])
+            if r[7] is not None:
+                volume_sum_by_bucket[bucket] = volume_sum_by_bucket.get(bucket, 0.0) + float(r[7])
         resampled = resample_candles(candles, bucket_minutes=5, source_bucket_minutes=1)
         upstox_candles = [
             UpstoxCandle(
                 symbol=c.symbol, started_at=c.started_at, open=c.open, high=c.high, low=c.low, close=c.close,
                 open_interest=last_oi_by_bucket.get(c.started_at),
+                volume=volume_sum_by_bucket.get(c.started_at),
             )
             for c in resampled
         ]
