@@ -4,21 +4,42 @@ Run these in order. Read `CONNECTION.md` first for credentials and API limits.
 
 Interpreter throughout: `C:\Users\DELL\pyembed312\python.exe`
 
+## Before running anything: check the token is alive
+
+`DHAN_ACCESS_TOKEN` lives about 24 hours and is the single most common reason a
+run fails. A multi-hour job against an expired token just produces an empty
+database and a `failed_requests.json` full of triples that aren't genuinely
+missing — worth one cheap call first:
+
+```python
+from datetime import date, timedelta
+from options_bot.credentials import load_credentials
+from options_bot.dhan_data import DhanClient
+
+client = DhanClient(load_credentials("credentials.env")["DHAN_ACCESS_TOKEN"].strip())
+points = client.fetch_index_intraday(from_date=date.today() - timedelta(days=5), to_date=date.today())
+print(f"OK -- {len(points)} points")
+```
+
+A `DH-901` error here means the token has expired. See `REFRESH_TOKEN.md` — it's
+a manual step requiring your Dhan login, not something this repo can do for you.
+
 ## The command
 
-Everything below is wrapped in one runner. Use this rather than driving the steps
-by hand:
+Everything below is wrapped in one runner. `--walk-back` fetches backwards a
+year at a time from `--end` and stops once **two consecutive years** return
+nothing (one empty year alone is as likely to be a token/rate-limit blip as a
+real historical limit, so it isn't trusted alone):
 
 ```bash
-C:/Users/DELL/pyembed312/python.exe -u data_ingest/run_fetch.py     --start 2026-01-01 --end 2026-08-28 > data_ingest/data/fetch.log 2>&1
+C:/Users/DELL/pyembed312/python.exe -u data_ingest/run_fetch.py --walk-back --end 2026-08-28 > data_ingest/data/fetch.log 2>&1
 ```
 
 Then read `data_ingest/data/fetch.log`. Redirect rather than piping — piping to
 `tail` buffers until exit and a running job looks hung.
 
-Walk backwards a year at a time (2026, then 2025, then 2024…) until a range comes
-back empty. That is the API's historical limit, not a failure; record where it
-stopped.
+The log will show which year the fetch stopped at; that's the API's historical
+limit, not a failure.
 
 **Failed requests are retried at the end, not immediately.** A request that fails
 on a rate limit usually succeeds minutes later, and retrying at once just consumes
