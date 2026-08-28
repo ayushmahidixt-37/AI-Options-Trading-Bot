@@ -28,3 +28,4 @@ venv/
 build/
 *.egg-info/
 clean_room/data/
+data_ingest/data/*.sqlite3
