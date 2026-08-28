@@ -36,7 +36,7 @@ import json
 import sys
 import time
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -114,6 +114,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--db", default=str(DEFAULT_DB))
     parser.add_argument("--start")
     parser.add_argument("--end", default=date.today().isoformat())
+    parser.add_argument("--walk-back", action="store_true",
+                        help="Fetch backwards a year at a time from --end until a year returns "
+                             "nothing, which is the API's historical limit. Ignores --start.")
+    parser.add_argument("--stop-after-empty", type=int, default=2,
+                        help="Consecutive empty years before concluding the history has run out. "
+                             "More than one, because a single empty year can be a transient "
+                             "failure rather than the true end of the data.")
     parser.add_argument("--retry-only", action="store_true",
                         help="Skip fetching; only re-attempt requests in failed_requests.json.")
     parser.add_argument("--skip-index", action="store_true")
@@ -121,8 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--credentials", default=str(_REPO / "credentials.env"))
     args = parser.parse_args(argv)
 
-    if not args.retry_only and not args.start:
-        parser.error("--start is required unless --retry-only is given")
+    if not args.retry_only and not args.start and not args.walk_back:
+        parser.error("give --start, or --walk-back, or --retry-only")
 
     archive = MarketArchive(args.db)
     archive.initialize()
@@ -134,7 +141,38 @@ def main(argv: list[str] | None = None) -> int:
 
     failed: list[FailedRequest] = _load_failed() if args.retry_only else []
 
-    if not args.retry_only:
+    if not args.retry_only and args.walk_back:
+        cursor_end = date.fromisoformat(args.end)
+        empty_years = 0
+        while empty_years < args.stop_after_empty:
+            year_start = date(cursor_end.year - 1, cursor_end.month, 1)
+            print(f"\n=== walking back: {year_start} .. {cursor_end} ===", flush=True)
+            index_saved, warnings = (0, [])
+            if not args.skip_index:
+                index_saved, warnings = pull_index_range(client, archive, year_start, cursor_end)
+                print(f"  index: {index_saved:,} candles", flush=True)
+                for warning in warnings[:3]:
+                    print(f"  WARNING {warning}")
+
+            def show(summary):
+                note = f"  ({len(summary.failed_requests)} failed)" if summary.failed_requests else ""
+                print(f"  expiry {summary.expiry}: {summary.candles_saved:,} candles{note}", flush=True)
+
+            summaries = pull_range(client, archive, year_start, cursor_end, on_cycle_done=show)
+            for summary in summaries:
+                failed.extend(summary.failed_requests)
+            option_saved = sum(s.candles_saved for s in summaries)
+            print(f"  options: {option_saved:,} candles across {len(summaries)} cycles", flush=True)
+
+            if index_saved == 0 and option_saved == 0:
+                empty_years += 1
+                print(f"  nothing returned ({empty_years}/{args.stop_after_empty} empty)", flush=True)
+            else:
+                empty_years = 0
+            cursor_end = year_start - timedelta(days=1)
+        print(f"\nHistory appears to end around {cursor_end}. Stopping.", flush=True)
+
+    elif not args.retry_only:
         start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
         if not args.skip_index:
             print(f"\n[1/4] index candles {start} .. {end}", flush=True)
