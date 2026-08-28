@@ -3251,3 +3251,85 @@ learn from, not worth funding an account on.
 now been touched by something; the dataset is used up, and no further backtest here can resolve the
 two caveats above. Three months of forward paper would produce 15-20 trades that nobody could have
 overfit, which is the only remaining honest test.
+
+## 2026-08-28 — Quarter-level investigation concludes: RSI 60/40 alone is the best configuration; stacking degrades it
+
+**Closes the quarter-by-quarter investigation.** Four committed scripts
+(`quarter_selector.py`, `quarter_one_minute.py`, `quarter_dissection.py`,
+`combined_filter_study.py`) took the worst quarter (2024-Q2, worst for every variant), re-ran it at
+1-minute resolution, dissected all 125 trades, and tested what came out across five windows.
+
+### 1-minute resolution: two opposite results depending on how it is done
+
+| 2024-Q2 config | Trades | Win% | Fixed P&L |
+|---|---|---|---|
+| 5-min, same periods (current) | 157 | 34.4% | -20,740 |
+| 1-min, **same periods** (5x faster) | 916 | 23.3% | **-82,876** |
+| 1-min, **scaled periods** (like-for-like) | 125 | 36.8% | **-7,076** |
+
+Periods are counted in bars, so reusing 5/10/60/21 on 1-minute candles tests a five-times-faster
+strategy, not the same one at finer resolution -- and on a chop-sensitive strategy that amplifies
+whipsaw exactly as predicted. Scaled to the same wall-clock lookback, 1-minute cut the quarter's loss
+by 66%. **That improvement is real, not an artifact**: finer bars detect a stop breach closer to the
+stop price, so stop slippage falls. Monitoring every minute rather than every five would capture it
+live. It does not make the quarter profitable.
+
+### The dissection, and a trap it walked into
+
+2024-Q2, 46 winners vs 79 losers, on variables known at entry:
+
+| Variable | Winners | Losers | Usable? |
+|---|---|---|---|
+| Open interest | 6,567,100 | 4,195,550 | looked strong |
+| OI trend pre-entry | +0.8% | -0.9% | moderate |
+| RSI at signal | 52.0 | 47.9 | weak |
+| ATR at signal | 10.98 | 11.28 | no |
+| **signal confidence** | **0.523** | **0.525** | **worthless** |
+
+**The confidence metric is dead -- third independent confirmation.** Anything gating on
+`signal_confidence` is gating on noise.
+
+The 56% median gap in open interest looked like the finding of the day. It was not. Tested as an
+actual filter at 1M/2M/3M/5M across five windows, only 3M was consistently above the random median
+(mean 79th percentile) and **it never turned a single window profitable**; the others were chaotic
+(1M scored 0th percentile in 2021 and 100th in 2025-2026). Keeping the steadiest of four thresholds
+is selection, and the ~12% chance of that arising by luck is not small enough to call it real.
+
+**The lesson generalises beyond this filter: a gap in group medians shows a variable is ASSOCIATED
+with outcome; only a threshold test shows it is TRADEABLE.** The distributions overlap enough that
+no cut separates them. The identical trap had already produced the failed percentage stop, where an
+even starker MAE separation (84% of losers past -10% vs 24% of winners) still failed out-of-sample.
+
+### Head-to-head across five windows, each with a 120-draw random control
+
+| Variant | Windows P&L>0 | Mean percentile | Min | Total P&L |
+|---|---|---|---|---|
+| baseline | **0/5** | - | - | **-213,468** |
+| **RSI 60/40** | **4/5** | **92.8** | **77** | **+32,596** |
+| OI >= 3M | 0/5 | 79.5 | 65 | -120,701 |
+| RSI 60/40 + OI >= 3M | 3/5 | 69.3 | 31 | +12,655 |
+
+**Stacking the two filters degrades the result** -- mean percentile 92.8 -> 69.3, minimum 77th ->
+31st, total P&L more than halved. This was predicted in advance and for the stated reason: two
+filters each selected against the same archive multiply overfitting risk rather than adding
+evidence. **RSI 60/40 alone remains the best configuration this project has produced.**
+
+### Quarter by quarter, 2020-2026 (25 quarters)
+
+**RSI 60/40 profitable in 18, losing in 6. Baseline profitable in 3, losing in 22.**
+
+The blemishes are on the record: **2024-Q1, Q2 and Q3 are all negative** -- a three-quarter losing
+run -- before five consecutive positive quarters through 2026. Several quarters rest on 2-4 trades
+and should not be read at all.
+
+### Status: Open, and what would change it
+
+Roughly 280 trades over six years (~47/year, about one a week) for +32,596 -- a modest edge on a
+low-frequency system, not a passive-income engine. It remains **Open rather than Confirmed** for the
+reasons already recorded: it misses the pre-registered "95th percentile in every window" bar
+(minimum 77th), and 60/40 was chosen after seeing results while the rule the diagnosis actually
+implied (55/45) scored the 49th percentile on 2020.
+
+Every window in this archive has now been searched. No further backtest here can resolve those two
+caveats, and each additional test raises the overfitting risk rather than lowering it. **The only
+remaining honest test is forward paper.**
