@@ -4,6 +4,41 @@ Run these in order. Read `CONNECTION.md` first for credentials and API limits.
 
 Interpreter throughout: `C:\Users\DELL\pyembed312\python.exe`
 
+## The command
+
+Everything below is wrapped in one runner. Use this rather than driving the steps
+by hand:
+
+```bash
+C:/Users/DELL/pyembed312/python.exe -u data_ingest/run_fetch.py     --start 2026-01-01 --end 2026-08-28 > data_ingest/data/fetch.log 2>&1
+```
+
+Then read `data_ingest/data/fetch.log`. Redirect rather than piping — piping to
+`tail` buffers until exit and a running job looks hung.
+
+Walk backwards a year at a time (2026, then 2025, then 2024…) until a range comes
+back empty. That is the API's historical limit, not a failure; record where it
+stopped.
+
+**Failed requests are retried at the end, not immediately.** A request that fails
+on a rate limit usually succeeds minutes later, and retrying at once just consumes
+the same limit. Anything still failing after the retry rounds is written to
+`data_ingest/data/failed_requests.json`, with exactly which (strike, option type,
+cycle) triples are missing. Re-attempt just those, any time:
+
+```bash
+C:/Users/DELL/pyembed312/python.exe -u data_ingest/run_fetch.py --retry-only
+```
+
+Storage is idempotent — re-saving an existing candle is a no-op — so re-running is
+always safe. The runner exits non-zero while anything is still missing.
+
+If the Dhan token expires mid-run (~24h), refresh it and run the same command
+again; already-saved rows are skipped.
+
+The steps below describe what the runner does, for when something needs driving
+by hand.
+
 ## Target database
 
 Write to a **new file**, not the main archive:

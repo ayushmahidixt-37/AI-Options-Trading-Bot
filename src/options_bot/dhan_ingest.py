@@ -289,6 +289,7 @@ def retry_failed_requests(
                         high=p.high if p.high is not None else p.open,
                         low=p.low if p.low is not None else p.open,
                         close=p.close, open_interest=p.open_interest,
+                        volume=p.volume, implied_volatility=p.implied_volatility,
                     )
                     for p in strike_points
                 ]
