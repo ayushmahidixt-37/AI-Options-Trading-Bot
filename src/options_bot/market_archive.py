@@ -162,6 +162,10 @@ class MarketArchive:
             self._ensure_column(con, "market_candles", "open_interest", "REAL")
             self._ensure_column(con, "market_candles", "derived_from_timeframe", "TEXT")
             self._ensure_column(con, "market_candles", "implied_volatility", "REAL")
+            # Added 2026-08-28. Dhan already returns volume on every rolling-option
+            # call; it was parsed and then dropped for want of a column. Additive and
+            # nullable, so existing rows simply carry NULL.
+            self._ensure_column(con, "market_candles", "volume", "REAL")
             self._ensure_column(con, "range_usage", "params_fingerprint", "TEXT")
 
     @staticmethod
@@ -317,6 +321,8 @@ class MarketArchive:
                 collected_at.isoformat(),
                 candle.open_interest,
                 None,
+                candle.volume,
+                candle.implied_volatility,
             )
             for candle in candles
         ]
@@ -326,8 +332,8 @@ class MarketArchive:
                 """INSERT OR IGNORE INTO market_candles(
                        instrument_token, symbol, exchange_name, timeframe, started_at,
                        open, high, low, close, source, collected_at, open_interest,
-                       derived_from_timeframe
-                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                       derived_from_timeframe, volume, implied_volatility
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 rows,
             )
             return con.total_changes - before

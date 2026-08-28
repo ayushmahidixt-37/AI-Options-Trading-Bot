@@ -40,6 +40,15 @@ class UpstoxCandle:
     low: float
     close: float
     open_interest: float | None = None
+    # Both added 2026-08-28. Dhan's rolling-option feed already returns volume
+    # and implied volatility -- they were being requested, parsed into
+    # DhanRollingPoint, and then dropped at this boundary because there was
+    # nowhere to put them. Volume was lost outright; IV needed a second
+    # UPDATE pass (backfill_implied_volatility) to be recovered. Expired
+    # contracts cannot be re-fetched later, so every ingestion run that
+    # discarded these lost them permanently.
+    volume: float | None = None
+    implied_volatility: float | None = None
 
 
 def parse_candle_row(symbol: str, row: list[object]) -> UpstoxCandle:

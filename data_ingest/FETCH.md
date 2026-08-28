@@ -54,9 +54,28 @@ summaries = pull_range(client, archive, date(2026, 1, 1), date.today(),
                        on_cycle_done=lambda s: print(s))
 ```
 
-Iterates weekly expiry cycles oldest-first and stores the full strike ladder with
-`open_interest` and `implied_volatility`. This is the slow part — expect
-minutes-to-hours depending on span. Print each cycle so progress is visible.
+Iterates weekly expiry cycles oldest-first and stores the strike ladder with
+`open_interest`, `implied_volatility` **and `volume`**. This is the slow part —
+expect minutes-to-hours depending on span. Print each cycle so progress is visible.
+
+**Fixed 2026-08-28, immediately before this folder was written.** Dhan returns
+volume and IV on every rolling-option call, but both were being parsed and then
+discarded: `UpstoxCandle` had no field for them and `market_candles` had no
+`volume` column. Volume was lost outright; IV had to be recovered by a second
+UPDATE pass. Expired contracts cannot be re-fetched, so every earlier run lost
+that data permanently. Both now persist on the first pass — verify `volume` is
+populated in step 4 rather than assuming it.
+
+### Strike coverage — decide before fetching, not after
+
+`dhan_ingest.STRIKE_OFFSETS` is `range(-10, 11)`: ATM±10 strikes, CE and PE, 42
+requests per weekly cycle. At 50-point strikes on a ~24,000 index that is roughly
+**±2% around spot**.
+
+Anything further out — 3-5% OTM strangles, wing hedges, ratio spreads — will have
+**no data, ever**, because the contracts expire and cannot be fetched again later.
+Widening the range costs proportionally more requests and time. Raise it now if
+wider strikes might matter; it cannot be repaired retrospectively.
 
 ## Step 3 — resample to 5-minute (required)
 

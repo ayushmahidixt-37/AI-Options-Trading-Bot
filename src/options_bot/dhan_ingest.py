@@ -208,6 +208,7 @@ def pull_weekly_cycle(
                     high=point.high if point.high is not None else point.open,
                     low=point.low if point.low is not None else point.open,
                     close=point.close, open_interest=point.open_interest,
+                    volume=point.volume, implied_volatility=point.implied_volatility,
                 )
                 for point in points
             ]
