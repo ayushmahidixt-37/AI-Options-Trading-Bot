@@ -30,7 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--start", required=True)
     parser.add_argument("--end", required=True)
     parser.add_argument("--out", required=True)
-    parser.add_argument("--timeframe", default="ONE_MINUTE")
+    parser.add_argument("--timeframes", default="FIVE_MINUTE,ONE_MINUTE",
+                        help="Comma-separated. MUST include the timeframe STRATEGY.md "
+                             "specifies, or the dataset cannot produce a single trade.")
     parser.add_argument("--warmup-days", type=int, default=20,
                         help="Extra history before --start so the 60-bar macro EMA is warm.")
     args = parser.parse_args(argv)
@@ -46,7 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     lo = fetch_from.isoformat()
     hi = (end + timedelta(days=1)).isoformat()
 
-    print(f"Exporting {args.timeframe} {fetch_from} .. {end}")
+    timeframes = [tf.strip() for tf in args.timeframes.split(",") if tf.strip()]
+    print(f"Exporting {timeframes} {fetch_from} .. {end}")
     print(f"  (evaluation window starts {start}; {args.warmup_days} days of warm-up included)")
     started = time.time()
 
@@ -71,14 +74,15 @@ def main(argv: list[str] | None = None) -> int:
         """
     )
     con.execute("ATTACH DATABASE ? AS src", (str(Path(args.archive).resolve()),))
+    placeholders = ",".join("?" for _ in timeframes)
     con.execute(
-        """INSERT INTO market_candles
+        f"""INSERT INTO market_candles
            SELECT instrument_token, symbol, exchange_name, timeframe, started_at,
                   open, high, low, close, source, collected_at, open_interest,
                   derived_from_timeframe, implied_volatility
            FROM src.market_candles
-           WHERE timeframe=? AND started_at>=? AND started_at<?""",
-        (args.timeframe, lo, hi),
+           WHERE timeframe IN ({placeholders}) AND started_at>=? AND started_at<?""",
+        (*timeframes, lo, hi),
     )
     candles = con.total_changes
     con.execute(

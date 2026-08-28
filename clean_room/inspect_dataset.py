@@ -21,6 +21,10 @@ from datetime import date
 from pathlib import Path
 
 NIFTY = "NSE_INDEX|Nifty 50"
+# Must match STRATEGY.md. A dataset lacking this timeframe yields zero trades
+# while every other health check still passes -- which is how a broken dataset
+# reported itself as fine and produced an empty evaluation.
+REQUIRED_TIMEFRAME = "FIVE_MINUTE"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -43,6 +47,17 @@ def main(argv: list[str] | None = None) -> int:
     ):
         print(f"  {timeframe:<13} {source:<9} {lo} .. {hi}   {rows:>12,} rows")
 
+    have = {r[0] for r in con.execute("SELECT DISTINCT timeframe FROM market_candles")}
+    if REQUIRED_TIMEFRAME not in have:
+        print(f"\n  FATAL: STRATEGY.md requires {REQUIRED_TIMEFRAME} candles and this dataset")
+        print(f"  has only {sorted(have)}. The engine does not derive one timeframe from")
+        print("  another -- it will find no candles and report zero trades. Re-export with")
+        print(f"  --timeframes {REQUIRED_TIMEFRAME},ONE_MINUTE before evaluating.")
+        return 1
+    n_required = con.execute("SELECT COUNT(*) FROM market_candles WHERE timeframe=?",
+                             (REQUIRED_TIMEFRAME,)).fetchone()[0]
+    print(f"\n  strategy timeframe {REQUIRED_TIMEFRAME}: {n_required:,} rows present")
+
     total, tokens, oi, iv = con.execute(
         """SELECT COUNT(*), COUNT(DISTINCT instrument_token),
                   SUM(CASE WHEN open_interest IS NOT NULL THEN 1 ELSE 0 END),
@@ -61,8 +76,9 @@ def main(argv: list[str] | None = None) -> int:
           f"({expiries[0]} .. {expiries[1]})")
 
     underlying = [date.fromisoformat(r[0]) for r in con.execute(
-        "SELECT DISTINCT date(started_at) FROM market_candles WHERE instrument_token=? "
-        "ORDER BY 1", (NIFTY,))]
+        "SELECT DISTINCT date(started_at) FROM market_candles "
+        "WHERE instrument_token=? AND timeframe=? ORDER BY 1",
+        (NIFTY, REQUIRED_TIMEFRAME))]
     if not underlying:
         print("\n  WARNING: no candles for the NIFTY index itself. The strategy cannot run.")
         return 1
@@ -81,8 +97,9 @@ def main(argv: list[str] | None = None) -> int:
 
     thin = con.execute(
         """SELECT date(started_at), COUNT(*) FROM market_candles
-           WHERE instrument_token=? GROUP BY 1 HAVING COUNT(*) < 100 ORDER BY 1 LIMIT 10""",
-        (NIFTY,),
+           WHERE instrument_token=? AND timeframe=?
+           GROUP BY 1 HAVING COUNT(*) < 40 ORDER BY 1 LIMIT 10""",
+        (NIFTY, REQUIRED_TIMEFRAME),
     ).fetchall()
     if thin:
         print(f"\n  {len(thin)} day(s) with unusually few index candles (partial sessions?):")
