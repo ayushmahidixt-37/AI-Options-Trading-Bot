@@ -27,3 +27,4 @@ __pycache__/
 venv/
 build/
 *.egg-info/
+clean_room/data/
