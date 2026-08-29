@@ -32,6 +32,7 @@ VALID_OUTCOME_LABELS = frozenset({"confirmed", "exploratory", "rejected", "open"
 CALLER_ASSIGNABLE_OUTCOME_LABELS = frozenset(VALID_OUTCOME_LABELS - {"confirmed"})
 
 _PRE_LEDGER_SEED_CANDIDATE = "_pre_ledger_history_seed"
+_RESERVATION_NOTES_SENTINEL = "RESERVED: backtest in progress"
 
 _USAGE_COLUMNS = (
     "id",
@@ -370,7 +371,7 @@ def reserve_test_range(
                 None,
                 forced_override_reason if not check.allowed else None,
                 None,
-                "RESERVED: backtest in progress",
+                _RESERVATION_NOTES_SENTINEL,
                 params_fingerprint,
             ),
         )
@@ -387,7 +388,7 @@ def reserve_test_range(
         outcome_label=None,
         forced_override_reason=forced_override_reason if not check.allowed else None,
         git_commit=None,
-        notes="RESERVED: backtest in progress",
+        notes=_RESERVATION_NOTES_SENTINEL,
         params_fingerprint=params_fingerprint,
     )
 
@@ -514,13 +515,17 @@ def classify_confirmation(
       never allowed to run, or hasn't been attempted yet).
 
     ``BACKTEST_FINDINGS.md`` entries must quote this return value verbatim
-    rather than a bot's own judgement.
+    rather than a bot's own judgement. Unfinished reservations (see
+    ``reserve_test_range`` -- a crash between reserving and finalizing)
+    are deliberately excluded here: an in-progress row must never be
+    mistaken for a completed, clean test just because it has no forced
+    override reason.
     """
     with archive.connect() as con:
         row = con.execute(
             """SELECT forced_override_reason FROM range_usage
                WHERE candidate_name=? AND role=? AND underlying_key=? AND timeframe=?
-                 AND range_start=? AND range_end=?
+                 AND range_start=? AND range_end=? AND notes!=?
                ORDER BY id DESC LIMIT 1""",
             (
                 candidate_name,
@@ -529,6 +534,7 @@ def classify_confirmation(
                 timeframe,
                 start.isoformat(),
                 end.isoformat(),
+                _RESERVATION_NOTES_SENTINEL,
             ),
         ).fetchone()
     if row is None:

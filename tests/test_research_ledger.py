@@ -566,6 +566,27 @@ def test_reserve_and_finalize_round_trip_is_what_classify_confirmation_certifies
     assert classification == "eligible_confirmed"
 
 
+def test_classify_confirmation_never_certifies_an_unfinished_reservation(tmp_path: Path) -> None:
+    """Regression test: a crash between reserve_test_range() and
+    finalize_test_reservation() must not be mistaken for a completed,
+    clean test just because the reservation row has no forced-override
+    reason set."""
+    store = archive(tmp_path)
+    reservation = reserve_test_range(
+        store, candidate_name="Crashed candidate", underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 1), end=date(2026, 7, 31),
+    )
+    assert reservation is not None
+    # Simulate a crash: finalize_test_reservation is never called.
+
+    classification = classify_confirmation(
+        store, candidate_name="Crashed candidate",
+        underlying_key=UNDERLYING, timeframe=TIMEFRAME,
+        start=date(2026, 6, 1), end=date(2026, 7, 31),
+    )
+    assert classification == "blocked_reused_test"
+
+
 def test_reserve_test_range_refuses_a_blocked_range_without_forced_override(tmp_path: Path) -> None:
     store = archive(tmp_path)
     record_usage(
