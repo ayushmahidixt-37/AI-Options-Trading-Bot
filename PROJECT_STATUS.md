@@ -11,8 +11,8 @@ candidate.** Done in parallel with, and using an older/smaller archive
 snapshot than, the DhanHQ-backed Candidate B work immediately below --
 this does not change Candidate B's confirmed/live status. A full-range
 breakdown across all 11 pre-DhanHQ `STRATEGY_VARIANTS` found 10:25-11:25
-IST is the worst hour in 9 of 11 of them (often by a wide margin), and
-Tuesday/Friday are disproportionately the worst days. Added a new
+IST is the worst hour in 10 of 11 of them (often by a wide margin), and
+Tuesday or Friday is the worst day in all 11. Added a new
 `BacktestParameters` field pair, `excluded_entry_start`/
 `excluded_entry_end`, so a candidate can skip just that one hour (the
 existing `entry_start`/`entry_end` can only express one contiguous

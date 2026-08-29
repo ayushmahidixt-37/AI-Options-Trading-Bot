@@ -2146,6 +2146,23 @@ variant over the whole 7-month archive, not a development/validation/test
 split. Useful for spotting cross-strategy patterns, not for picking a
 winner.
 
+**Ledger note:** these 11 runs (and the "Skip 10:25-11:25" candidate
+below) were executed against a disconnected sandbox snapshot of the
+archive, not through `options-bot backtest` against the same live
+database `research/range_usage_ledger.json` now tracks (which by this
+point had moved on to the DhanHQ-backed, multi-year archive from the
+work described elsewhere in this log). They're recorded in that
+sandbox snapshot's own local ledger for this analysis's own
+completeness, but genuinely can't be merged into the committed export
+without fabricating history for a database that never saw them.
+Recorded here in prose instead, per this rule's actual intent
+(AGENTS.md rule 6) -- a future idea-generation pass reading
+`BACKTEST_FINDINGS.md` (or a human) can still see these names/ranges
+were tried, even though the machine-readable ledger export can't. Going
+forward, exploratory analysis like this should run through the CLI
+directly against the live archive so it lands in the ledger the normal
+way.
+
 | Strategy | Trades | Net P&L | Best hour | Worst hour | Best day | Worst day |
 |---|---|---|---|---|---|---|
 | Baseline | 277 | +15,400.35 | 11:25-12:25 (+318) | 10:25-11:25 (-308) | Thursday (+258) | Friday (-93) |
@@ -2162,11 +2179,11 @@ winner.
 
 Two patterns hold across nearly every variant, not just one:
 
-- **10:25-11:25 is the worst hour in 9 of 11 strategies** — often by a
+- **10:25-11:25 is the worst hour in 10 of 11 strategies** — often by a
   wide margin (-1,081/trade on "No stop-loss cap"). This is the most
   consistent single signal seen across every version tested so far.
 - **Thursday is the best day in 6 of 11 strategies; Tuesday or Friday is
-  the worst day in 9 of 11.**
+  the worst day in all 11, with no exceptions.**
 
 ### New candidate: "Skip 10:25-11:25" — development/validation only
 
@@ -2210,10 +2227,14 @@ regression test. Re-running after the fix barely moved the numbers above
 reversals inside this specific window turned out to be rare in this
 dataset — but the corrected numbers are what's shown here.
 
-Beats Baseline on both legs, and — like "Morning entries" — is one of
-only two variants tested so far that stays *positive* on validation
-(Baseline and most others go negative there). Lower drawdown than
-Baseline too (12,399 vs 15,561). **Status: `dev_validation_only` — no
+Beats Baseline on both legs — Baseline itself goes negative on
+validation (-626.80), this candidate doesn't (+2,943.25), with lower
+drawdown too (12,399 vs 15,561). (Several other variants elsewhere in
+this log also have positive validation P&L on their own splits --
+Strict RSI, Morning entries, RSI 58/42, RSI 60/40, among others -- so
+this is a real improvement over Baseline specifically, not a claim of
+uniqueness across every candidate ever tested.) **Status:
+`dev_validation_only` — no
 test leg was attempted.** The archive has no fresh test range available
 (see "Ideas proposed but not yet tested" above); this is `check_range`
 reporting `dev_validation_only` correctly, not a shortcut. Not Confirmed,

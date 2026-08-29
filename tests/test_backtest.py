@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from options_bot.backtest import (
     BacktestParameters,
     BacktestResult,
@@ -286,10 +288,19 @@ def test_within_excluded_entry_window_boundaries() -> None:
     assert _within_excluded_entry_window(at("12:00"), params) is False
 
 
-def test_within_excluded_entry_window_requires_both_bounds_set() -> None:
-    params = BacktestParameters(name="X", excluded_entry_start=time(10, 25))
+def test_backtest_parameters_rejects_one_sided_excluded_window() -> None:
+    """A candidate with only one bound set would otherwise silently run with
+    no exclusion applied at all -- see the P2 review finding this guards
+    against. Reject at construction time, not deep inside the engine."""
+    with pytest.raises(ValueError, match="must both be set together"):
+        BacktestParameters(name="X", excluded_entry_start=time(10, 25))
+    with pytest.raises(ValueError, match="must both be set together"):
+        BacktestParameters(name="X", excluded_entry_end=time(11, 25))
 
-    assert _within_excluded_entry_window(datetime(2026, 6, 1, 10, 45, tzinfo=IST), params) is False
+
+def test_backtest_parameters_rejects_a_backwards_excluded_window() -> None:
+    with pytest.raises(ValueError, match="strictly before"):
+        BacktestParameters(name="X", excluded_entry_start=time(11, 25), excluded_entry_end=time(10, 25))
 
 
 def test_observation_allowed_does_not_gate_on_excluded_entry_window() -> None:

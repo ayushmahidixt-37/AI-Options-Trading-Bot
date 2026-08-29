@@ -218,6 +218,20 @@ class BacktestParameters:
     minimum_implied_volatility: float | None = None
     maximum_implied_volatility: float | None = None
 
+    def __post_init__(self) -> None:
+        if (self.excluded_entry_start is None) != (self.excluded_entry_end is None):
+            raise ValueError(
+                "excluded_entry_start and excluded_entry_end must both be set together, "
+                "or both left unset -- a candidate with only one bound would silently run "
+                "with no exclusion applied at all"
+            )
+        if (
+            self.excluded_entry_start is not None
+            and self.excluded_entry_end is not None
+            and self.excluded_entry_start >= self.excluded_entry_end
+        ):
+            raise ValueError("excluded_entry_start must be strictly before excluded_entry_end")
+
 
 def run_momentum_backtest(
     archive: MarketArchive,
