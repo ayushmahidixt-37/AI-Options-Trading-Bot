@@ -201,7 +201,70 @@ not as proof.
   form — that range has now been used multiple times across the
   full-range pass, the first split, and the Round 2 comparisons) to give
   "Morning entries" its first clean, untouched check before it can be
-  called Confirmed rather than Exploratory.
+  called Confirmed rather than Exploratory. The same applies to "Skip
+  10:25-11:25" below.
+
+## 2026-08-29 — Cross-strategy time-of-day/day-of-week breakdown, and a new candidate
+
+**Data used:** the same real Upstox archive as above (2026-01-01 to
+2026-07-31), still the only period ever ingested — no new calendar days
+have accrued since the 2026-08-12 entry, so the untouched-test-range
+problem noted above is unchanged.
+
+### Full-range pass (all 11 existing variants, no split — context only)
+
+Same caveat as every full-range pass in this log: single backtest per
+variant over the whole 7-month archive, not a development/validation/test
+split. Useful for spotting cross-strategy patterns, not for picking a
+winner.
+
+| Strategy | Trades | Net P&L | Best hour | Worst hour | Best day | Worst day |
+|---|---|---|---|---|---|---|
+| Baseline | 277 | +15,400.35 | 11:25-12:25 (+318) | 10:25-11:25 (-308) | Thursday (+258) | Friday (-93) |
+| Strict RSI | 209 | +15,529.45 | 12:25-13:25 (+586) | 10:25-11:25 (-327) | Monday (+197) | Friday (-26) |
+| ATR floor | 260 | +5,541.25 | 12:25-13:25 (+324) | 10:25-11:25 (-311) | Thursday (+258) | Tuesday (-253) |
+| Morning entries | 91 | +12,808.90 | 11:25-12:25 (+483) | 10:25-11:25 (-333) | Thursday (+716) | Friday (-354) |
+| Tuesday-Thursday | 169 | +10,565.75 | 09:25-10:25 (+732) | 10:25-11:25 (-296) | Thursday (+258) | Tuesday (-56) |
+| No expiry day | 214 | +4,425.70 | 09:25-10:25 (+439) | 10:25-11:25 (-307) | Thursday (+258) | Friday (-93) |
+| Tighter stop | 277 | -490.20 | 11:25-12:25 (+307) | 10:25-11:25 (-238) | Thursday (+278) | Friday (-240) |
+| 30-minute hold | 277 | +4,817.05 | 12:25-13:25 (+185) | 10:25-11:25 (-165) | Wednesday (+104) | Tuesday (-69) |
+| 20% target | 277 | +9,965.70 | 12:25-13:25 (+285) | 14:25-15:00 (-151) | Monday (+149) | Tuesday (-108) |
+| 10% trailing stop | 277 | +922.25 | 12:25-13:25 (+345) | 10:25-11:25 (-196) | Wednesday (+130) | Tuesday (-170) |
+| No stop-loss cap | 277 | -17,717.15 | 13:25-14:25 (+544) | 10:25-11:25 (-1,081) | Wednesday (+620) | Tuesday (-602) |
+
+Two patterns hold across nearly every variant, not just one:
+
+- **10:25-11:25 is the worst hour in 9 of 11 strategies** — often by a
+  wide margin (-1,081/trade on "No stop-loss cap"). This is the most
+  consistent single signal seen across every version tested so far.
+- **Thursday is the best day in 6 of 11 strategies; Tuesday or Friday is
+  the worst day in 9 of 11.**
+
+### New candidate: "Skip 10:25-11:25" — development/validation only
+
+Motivated directly by the pattern above. Adds two new
+`BacktestParameters` fields, `excluded_entry_start`/`excluded_entry_end`
+(`src/options_bot/backtest.py`), since the existing `entry_start`/
+`entry_end` can only express one contiguous window and can't carve a
+single hour out of the middle of the day. Same development (Jan-Mar) /
+validation (Apr-May) ranges as the first split above, for direct
+comparison against Baseline:
+
+| Variant | Dev | Validation |
+|---|---|---|
+| Baseline (for comparison) | 68t/+20,517.50 | 86t/-626.80/15,561DD |
+| **Skip 10:25-11:25** | 59t/+23,418.35 | 76t/**+2,943.25**/12,399DD |
+
+Beats Baseline on both legs, and — like "Morning entries" — is one of
+only two variants tested so far that stays *positive* on validation
+(Baseline and most others go negative there). Lower drawdown than
+Baseline too (12,399 vs 15,561). **Status: `dev_validation_only` — no
+test leg was attempted.** The archive has no fresh test range available
+(see "Ideas proposed but not yet tested" above); this is `check_range`
+reporting `dev_validation_only` correctly, not a shortcut. Not Confirmed,
+not yet Exploratory — genuinely **Open**, same bar "Morning entries" is
+waiting on: a calendar period past 2026-07-31 that this project has never
+looked at in any form.
 
 ### Data used for this log
 

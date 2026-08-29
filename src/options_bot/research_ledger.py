@@ -194,10 +194,19 @@ def initialize_ledger(archive: MarketArchive) -> None:
     range_usage rows, seed one conservative ``screening`` row spanning the
     full existing candle span, so pre-ledger history can never be
     certified as an untouched test range.
+
+    Scoped to index candles only (``exchange_name='NSE_INDEX'``) -- every
+    ``check_range``/``record_usage`` call in this codebase uses the
+    underlying index as its ``underlying_key`` (see
+    ``upstox_ingest.NIFTY_UNDERLYING_KEY``), never an individual option
+    contract's own token. Without this filter, every option contract ever
+    archived (hundreds of distinct instrument_token values, one per
+    strike/expiry) would each get its own irrelevant seed row.
     """
     with archive.connect() as con:
         scopes = con.execute(
-            "SELECT DISTINCT instrument_token, timeframe FROM market_candles WHERE source='upstox'"
+            """SELECT DISTINCT instrument_token, timeframe FROM market_candles
+               WHERE source='upstox' AND exchange_name='NSE_INDEX'"""
         ).fetchall()
     for underlying_key, timeframe in scopes:
         if _fetch_all_usage(archive, underlying_key, timeframe):

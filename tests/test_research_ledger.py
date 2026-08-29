@@ -349,6 +349,29 @@ def test_initialize_ledger_seeds_a_conservative_row_from_existing_candles(tmp_pa
     assert fresh.allowed is True
 
 
+def test_initialize_ledger_does_not_seed_a_row_per_option_contract(tmp_path: Path) -> None:
+    """Regression test: a real archive has hundreds of distinct option-contract
+    instrument_token values (one per strike/expiry, exchange_name='NFO'). Only
+    the underlying index (exchange_name='NSE_INDEX') is ever used as a
+    check_range/record_usage scope -- seeding one row per option contract
+    would flood the ledger with rows nothing ever queries."""
+    store = archive(tmp_path)
+    _seed_candles(store, date(2026, 8, 3))
+    option_start = datetime(2026, 8, 3, 9, 20, tzinfo=IST)
+    option_candles = [UpstoxCandle("NIFTY24600CE", option_start, 100, 102, 99, 101)]
+    store.save_upstox_candles(
+        option_candles, token="NSE_FO|1|13-08-2026", exchange="NFO",
+        timeframe=TIMEFRAME, collected_at=option_start,
+    )
+
+    initialize_ledger(store)
+
+    context = research_context_for_evaluation(store)
+    scopes = {row["underlying_key"] for row in context["usage_history"]}
+
+    assert scopes == {UNDERLYING}, "only the index scope should be seeded, not option contracts"
+
+
 def test_initialize_ledger_is_idempotent_and_does_not_overwrite_real_history(tmp_path: Path) -> None:
     store = archive(tmp_path)
     _seed_candles(store, date(2026, 8, 3))

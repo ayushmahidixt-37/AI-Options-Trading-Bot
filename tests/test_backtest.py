@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from options_bot.backtest import (
     BacktestParameters,
     BacktestResult,
     OptionBacktestTrade,
+    _observation_allowed,
     export_backtest_csv,
     run_momentum_backtest,
 )
@@ -259,3 +260,32 @@ def test_capital_deployed_and_return_on_capital_are_zero_or_none_without_trades(
     assert result.capital_deployed_total == 0.0
     assert result.capital_deployed_average == 0.0
     assert result.return_on_capital_pct is None
+
+
+def test_observation_allowed_excludes_a_configured_mid_day_window() -> None:
+    """Motivated by a cross-strategy finding in BACKTEST_FINDINGS.md: 10:25-11:25
+    was the worst hour in 9 of 11 tested variants. This is the field that lets a
+    candidate skip just that window while still trading the rest of the day --
+    entry_start/entry_end alone can only express one contiguous window."""
+    params = BacktestParameters(
+        name="Skip 10:25-11:25",
+        excluded_entry_start=time(10, 25),
+        excluded_entry_end=time(11, 25),
+    )
+
+    def row_at(hhmm: str) -> tuple:
+        return (f"2026-06-01T{hhmm}:00+05:30", 100.0, "BULLISH", None, None)
+
+    assert _observation_allowed(row_at("10:45"), params) is False
+    assert _observation_allowed(row_at("10:25"), params) is False, "start bound is inclusive"
+    assert _observation_allowed(row_at("11:24"), params) is False
+    assert _observation_allowed(row_at("11:25"), params) is True, "end bound is exclusive"
+    assert _observation_allowed(row_at("09:30"), params) is True
+    assert _observation_allowed(row_at("12:00"), params) is True
+
+
+def test_observation_allowed_ignores_excluded_window_unless_both_bounds_set() -> None:
+    params = BacktestParameters(name="X", excluded_entry_start=time(10, 25))
+    row = ("2026-06-01T10:45:00+05:30", 100.0, "BULLISH", None, None)
+
+    assert _observation_allowed(row, params) is True

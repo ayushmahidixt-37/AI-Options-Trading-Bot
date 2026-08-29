@@ -59,6 +59,8 @@ def _params_from_json(raw: str) -> BacktestParameters:
         minimum_atr=data.get("minimum_atr"),
         entry_start=_parse_time(data.get("entry_start")),
         entry_end=_parse_time(data.get("entry_end")),
+        excluded_entry_start=_parse_time(data.get("excluded_entry_start")),
+        excluded_entry_end=_parse_time(data.get("excluded_entry_end")),
         exclude_expiry_day=data.get("exclude_expiry_day", False),
         stop_risk_fraction=data.get("stop_risk_fraction", 0.8),
         maximum_hold_minutes=data.get("maximum_hold_minutes"),

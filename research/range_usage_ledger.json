@@ -1,0 +1,49 @@
+{
+  "usage_history": [
+    {
+      "candidate_name": "_pre_ledger_history_seed",
+      "forced_override_reason": null,
+      "git_commit": null,
+      "id": 530,
+      "notes": "Auto-seeded at ledger initialization from pre-existing archive candle data -- conservative cutoff so history predating this ledger can never be certified as an untouched test range.",
+      "outcome_label": null,
+      "params_fingerprint": null,
+      "range_end": "2026-07-31",
+      "range_start": "2026-01-01",
+      "recorded_at": "2026-08-29T13:03:27.497988",
+      "role": "screening",
+      "timeframe": "FIVE_MINUTE",
+      "underlying_key": "NSE_INDEX|Nifty 50"
+    },
+    {
+      "candidate_name": "Skip 10:25-11:25",
+      "forced_override_reason": null,
+      "git_commit": null,
+      "id": 531,
+      "notes": "",
+      "outcome_label": null,
+      "params_fingerprint": "6872e14207a79c6b",
+      "range_end": "2026-03-31",
+      "range_start": "2026-01-01",
+      "recorded_at": "2026-08-29T13:04:02.947555",
+      "role": "development",
+      "timeframe": "FIVE_MINUTE",
+      "underlying_key": "NSE_INDEX|Nifty 50"
+    },
+    {
+      "candidate_name": "Skip 10:25-11:25",
+      "forced_override_reason": null,
+      "git_commit": null,
+      "id": 532,
+      "notes": "",
+      "outcome_label": null,
+      "params_fingerprint": "6872e14207a79c6b",
+      "range_end": "2026-05-31",
+      "range_start": "2026-04-01",
+      "recorded_at": "2026-08-29T13:04:02.950800",
+      "role": "validation",
+      "timeframe": "FIVE_MINUTE",
+      "underlying_key": "NSE_INDEX|Nifty 50"
+    }
+  ]
+}

@@ -128,6 +128,8 @@ class BacktestParameters:
     minimum_atr: float | None = None
     entry_start: time | None = None
     entry_end: time | None = None
+    excluded_entry_start: time | None = None
+    excluded_entry_end: time | None = None
     exclude_expiry_day: bool = False
     stop_risk_fraction: float | None = 0.8
     maximum_hold_minutes: int | None = None
@@ -373,6 +375,12 @@ def _observation_allowed(row: object, parameters: BacktestParameters) -> bool:
     ):
         return False
     if parameters.entry_end and observed_at.time() > parameters.entry_end:
+        return False
+    if (
+        parameters.excluded_entry_start is not None
+        and parameters.excluded_entry_end is not None
+        and parameters.excluded_entry_start <= observed_at.time() < parameters.excluded_entry_end
+    ):
         return False
     if parameters.minimum_atr is not None and (
         atr_value is None or atr_value < parameters.minimum_atr

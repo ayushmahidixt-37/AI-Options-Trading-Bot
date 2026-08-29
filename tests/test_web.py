@@ -305,7 +305,11 @@ def test_web_requires_separate_confirmation_for_paper_proposal(tmp_path: Path) -
         }
     )
     manager = ConnectionManager(cfg)
-    now = datetime.now(IST)
+    # Fixed to a known weekday (not datetime.now()) -- entries_allowed() also
+    # gates on weekday, which ENTRY_START_IST/ENTRY_CUTOFF_IST above cannot
+    # override, so this test would otherwise flake whenever it happens to run
+    # on a real-world weekend.
+    now = datetime(2026, 8, 3, 10, 0, tzinfo=IST)
     instrument = Instrument(
         "NIFTY_TEST_CE",
         "123",

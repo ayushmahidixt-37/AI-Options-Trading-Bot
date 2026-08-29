@@ -4,7 +4,7 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-13
+**Last updated:** 2026-08-29
 **Current phase:** Forward paper evidence collection and validation review;
 Upstox historical-backtesting feature complete and merged to `main`. Two
 real-device (Termux) findings have been fixed: a Cloudflare bot-block (HTTP
@@ -51,6 +51,20 @@ happen in the first place. Still 100% read-only historical backtesting —
 this infrastructure has no write access to live/forward-paper execution
 paths, and nothing it produces reaches `main` without the normal
 PR review process.
+
+**New finding (2026-08-29): a consistent worst-hour pattern across every
+strategy tested.** A full-range breakdown across all 11 existing
+strategy variants found 10:25-11:25 IST is the single worst hour in 9 of
+11 of them (often by a wide margin), and Thursday is the best day in 6
+of 11 while Tuesday/Friday is the worst in 9 of 11. A new candidate,
+"Skip 10:25-11:25" (`BacktestParameters.excluded_entry_start`/
+`excluded_entry_end`, new fields added for this), beats Baseline on both
+development (+23,418.35 vs +20,517.50) and validation (+2,943.25 vs
+-626.80, with lower drawdown) over the same Jan-Mar/Apr-May split. Like
+"Morning entries," it has no test leg yet — the archive still has no
+fresh, never-analyzed range — so it's labeled **Open**, not Confirmed or
+Exploratory. See `BACKTEST_FINDINGS.md`'s 2026-08-29 entry for the full
+per-strategy table.
 **Production status:** Not approved for live trading
 
 ## Objective

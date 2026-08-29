@@ -12,8 +12,9 @@
   `BACKTEST_FINDINGS.md`'s "Ideas proposed but not yet tested" bullets.
 - The `BacktestParameters` field list in `src/options_bot/backtest.py`
   (name, bullish_rsi_min, bearish_rsi_max, minimum_atr, entry_start,
-  entry_end, exclude_expiry_day, stop_risk_fraction,
-  maximum_hold_minutes, target_return, trailing_stop, allowed_weekdays).
+  entry_end, excluded_entry_start, excluded_entry_end, exclude_expiry_day,
+  stop_risk_fraction, maximum_hold_minutes, target_return, trailing_stop,
+  allowed_weekdays).
 
 ## What you must NOT have access to
 
