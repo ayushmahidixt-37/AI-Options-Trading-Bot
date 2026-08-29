@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
+from options_bot.backtest import BacktestParameters
 from options_bot.candles import Candle
 from options_bot.config import Settings
 from options_bot.domain import Instrument
@@ -276,3 +277,62 @@ def test_run_upstox_backtest_respects_parameter_filters(tmp_path) -> None:
     )
 
     assert result.status == "INSUFFICIENT DATA"
+
+
+def test_run_upstox_backtest_closes_on_a_reversal_signal_inside_the_excluded_window(tmp_path) -> None:
+    """Regression test for a real bug: excluded_entry_start/excluded_entry_end
+    must gate opening a NEW trade only. An earlier version filtered reversal
+    signals out of the observation stream entirely, so a position opened
+    before the excluded window was held straight through a reversal that
+    landed inside it -- silently turning "skip entries during this hour"
+    into "the strategy is blind to this hour," a materially different (and
+    undocumented) behaviour."""
+    archive = MarketArchive(tmp_path / "market.sqlite3")
+    archive.initialize()
+    start = datetime(2026, 8, 6, 9, 15, tzinfo=IST)
+    underlying = _underlying_candles(25, start=start)
+    archive.save_upstox_candles(
+        [UpstoxCandle(c.symbol, c.started_at, c.open, c.high, c.low, c.close) for c in underlying],
+        token=NIFTY_UNDERLYING_KEY, exchange="NSE_INDEX", timeframe="FIVE_MINUTE", collected_at=start,
+    )
+    archive.save_instruments(
+        [Instrument("NIFTY13AUG2626600CE", "NSE_FO|1|13-08-2026", "NFO", "NIFTY",
+                     "CE", 75, date(2026, 8, 13), 100)],
+        start,
+    )
+    entry_time = start + timedelta(minutes=45)  # 10:00 -- candles[9], opens a trade
+    reversal_time = start + timedelta(minutes=90)  # 10:45 -- candles[18], inside the excluded window
+    ce_candles = [
+        UpstoxCandle(
+            "NIFTY13AUG2626600CE", entry_time + timedelta(minutes=5 * i),
+            100 + i, 102 + i, 99 + i, 101 + i,
+        )
+        for i in range(1, 10)  # 10:05 through 10:45
+    ]
+    archive.save_upstox_candles(
+        ce_candles, token="NSE_FO|1|13-08-2026", exchange="NFO",
+        timeframe="FIVE_MINUTE", collected_at=reversal_time,
+    )
+    settings = Settings.from_env(
+        {"DATA_DIR": str(tmp_path), "DATABASE_PATH": str(tmp_path / "paper.sqlite3")}
+    )
+    strategy = ScriptedStrategy(
+        {
+            10: Signal(Direction.BULLISH, 0.6, 10.0, "test"),  # observed 10:00
+            19: Signal(Direction.BEARISH, 0.6, 10.0, "test"),  # observed 10:45
+        }
+    )
+    parameters = BacktestParameters(
+        excluded_entry_start=time(10, 25), excluded_entry_end=time(11, 25), stop_risk_fraction=None
+    )
+
+    result = run_upstox_backtest(archive, strategy=strategy, settings=settings, parameters=parameters)
+
+    assert result.trades == 1, "no new trade should open on the reversal signal inside the excluded window"
+    trade = result.trade_details[0]
+    assert trade.direction == "BULLISH"
+    assert trade.exit_reason == "signal-reversal"
+    assert trade.exit_at == reversal_time, (
+        "the position must close on the 10:45 reversal, not be held through the excluded "
+        "window to a later signal or the session force-exit"
+    )

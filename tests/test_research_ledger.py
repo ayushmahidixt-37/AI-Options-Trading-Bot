@@ -372,6 +372,46 @@ def test_initialize_ledger_does_not_seed_a_row_per_option_contract(tmp_path: Pat
     assert scopes == {UNDERLYING}, "only the index scope should be seeded, not option contracts"
 
 
+def test_initialize_ledger_removes_stale_option_scope_seeds_from_an_earlier_bug(tmp_path: Path) -> None:
+    """An archive already upgraded once by an earlier, buggy initialize_ledger()
+    (before the exchange_name filter existed) has these polluted rows sitting
+    in range_usage already -- the fix must clean those up too, not just stop
+    creating new ones."""
+    store = archive(tmp_path)
+    _seed_candles(store, date(2026, 8, 3))
+    record_usage(
+        store, candidate_name="_pre_ledger_history_seed", role=UsageRole.SCREENING,
+        underlying_key="NSE_FO|1|13-08-2026", timeframe=TIMEFRAME,
+        start=date(2026, 8, 3), end=date(2026, 8, 3),
+    )
+
+    initialize_ledger(store)
+
+    context = research_context_for_evaluation(store)
+    scopes = {row["underlying_key"] for row in context["usage_history"]}
+
+    assert scopes == {UNDERLYING}, "the stale option-scope seed row must be removed"
+
+
+def test_initialize_ledger_never_deletes_a_real_usage_row(tmp_path: Path) -> None:
+    """The cleanup step must only ever remove rows recorded under the seed's
+    own sentinel candidate name -- a real candidate's history is sacred."""
+    store = archive(tmp_path)
+    _seed_candles(store, date(2026, 8, 3))
+    record_usage(
+        store, candidate_name="Some real candidate", role=UsageRole.SCREENING,
+        underlying_key="NSE_FO|1|13-08-2026", timeframe=TIMEFRAME,
+        start=date(2026, 8, 3), end=date(2026, 8, 3),
+    )
+
+    initialize_ledger(store)
+
+    context = research_context_for_evaluation(store)
+    names = {row["candidate_name"] for row in context["usage_history"]}
+
+    assert "Some real candidate" in names
+
+
 def test_initialize_ledger_is_idempotent_and_does_not_overwrite_real_history(tmp_path: Path) -> None:
     store = archive(tmp_path)
     _seed_candles(store, date(2026, 8, 3))

@@ -44,6 +44,36 @@
       "role": "validation",
       "timeframe": "FIVE_MINUTE",
       "underlying_key": "NSE_INDEX|Nifty 50"
+    },
+    {
+      "candidate_name": "Skip 10:25-11:25",
+      "forced_override_reason": null,
+      "git_commit": null,
+      "id": 533,
+      "notes": "",
+      "outcome_label": null,
+      "params_fingerprint": "6872e14207a79c6b",
+      "range_end": "2026-03-31",
+      "range_start": "2026-01-01",
+      "recorded_at": "2026-08-29T13:49:09.667474",
+      "role": "development",
+      "timeframe": "FIVE_MINUTE",
+      "underlying_key": "NSE_INDEX|Nifty 50"
+    },
+    {
+      "candidate_name": "Skip 10:25-11:25",
+      "forced_override_reason": null,
+      "git_commit": null,
+      "id": 534,
+      "notes": "",
+      "outcome_label": null,
+      "params_fingerprint": "6872e14207a79c6b",
+      "range_end": "2026-05-31",
+      "range_start": "2026-04-01",
+      "recorded_at": "2026-08-29T13:49:09.670557",
+      "role": "validation",
+      "timeframe": "FIVE_MINUTE",
+      "underlying_key": "NSE_INDEX|Nifty 50"
     }
   ]
 }

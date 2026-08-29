@@ -17,6 +17,7 @@ from .backtest import (
     BacktestResult,
     OptionBacktestTrade,
     _observation_allowed,
+    _within_excluded_entry_window,
     build_backtest_result,
 )
 from .candles import Candle
@@ -141,6 +142,8 @@ def run_upstox_backtest(
         trades: list[OptionBacktestTrade] = []
         for index, observation in enumerate(observations):
             observed_at = observation.observed_at
+            if _within_excluded_entry_window(observed_at, variant):
+                continue
             option_type = "CE" if observation.signal == "BULLISH" else "PE"
             contract = con.execute(
                 """SELECT i.token, i.lot_size, i.symbol, i.expiry

@@ -253,7 +253,34 @@ comparison against Baseline:
 | Variant | Dev | Validation |
 |---|---|---|
 | Baseline (for comparison) | 68t/+20,517.50 | 86t/-626.80/15,561DD |
-| **Skip 10:25-11:25** | 59t/+23,418.35 | 76t/**+2,943.25**/12,399DD |
+| **Skip 10:25-11:25** | 59t/+23,437.85 | 76t/**+2,943.25**/12,399DD |
+
+As with every prior candidate here (Morning entries included), the idea
+came from eyeballing an aggregate full-range pass that also happens to
+cover the development/validation dates — this is expected and by design:
+`AGENTS.md` rule 6 and this log's "How to read this log" section only
+require the **test** leg to be genuinely untouched; development and
+validation are explicitly always-reusable and always allowed to be
+screening-informed. The `research/prompts/ideation.md` no-numeric-context
+rule is scoped to the *automated* pipeline's Idea role for exactly this
+reason (an unsupervised loop chasing noise across many iterations is a
+different risk than one human-directed, transparently-reported look) —
+it does not retroactively apply to manual candidate proposals like this
+one.
+
+**Correction:** a Codex review on the PR that introduced this candidate
+caught a real bug in the first version of this check — it filtered
+reversal signals out of the observation stream entirely for the excluded
+window, so a position opened before 10:25 was held straight through a
+reversal landing inside it instead of closing on it (testing "the
+strategy is blind to this hour," not the documented "skip entries during
+this hour"). Fixed by gating trade-opening only, while keeping the full
+signal stream for exit/reversal detection (see
+`_within_excluded_entry_window` in `src/options_bot/backtest.py`), with a
+regression test. Re-running after the fix barely moved the numbers above
+(development net P&L +19.50, drawdown -19.50; validation identical) —
+reversals inside this specific window turned out to be rare in this
+dataset — but the corrected numbers are what's shown here.
 
 Beats Baseline on both legs, and — like "Morning entries" — is one of
 only two variants tested so far that stays *positive* on validation

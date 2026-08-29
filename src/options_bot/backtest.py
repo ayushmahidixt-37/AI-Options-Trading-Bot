@@ -185,6 +185,8 @@ def run_momentum_backtest(
         trades: list[OptionBacktestTrade] = []
         for index, observation in enumerate(observations):
             observed_at = datetime.fromisoformat(observation[0])
+            if _within_excluded_entry_window(observed_at, variant):
+                continue
             option_type = "CE" if observation[2] == "BULLISH" else "PE"
             contract = con.execute(
                 """SELECT token, lot_size, symbol, expiry FROM instruments
@@ -363,6 +365,13 @@ def build_backtest_result(
 
 
 def _observation_allowed(row: object, parameters: BacktestParameters) -> bool:
+    """Whether a signal counts at all -- both as a possible new entry and as
+    a reversal that can close an already-open trade. ``excluded_entry_start``/
+    ``excluded_entry_end`` is deliberately NOT checked here: see
+    ``_within_excluded_entry_window`` and its callers, which gate opening a
+    *new* trade only, so a reversal inside the excluded window still closes
+    an existing position instead of being invisible to it.
+    """
     observed_at = datetime.fromisoformat(row[0])
     signal = str(row[2])
     rsi_value = float(row[3]) if row[3] is not None else None
@@ -376,12 +385,6 @@ def _observation_allowed(row: object, parameters: BacktestParameters) -> bool:
         return False
     if parameters.entry_end and observed_at.time() > parameters.entry_end:
         return False
-    if (
-        parameters.excluded_entry_start is not None
-        and parameters.excluded_entry_end is not None
-        and parameters.excluded_entry_start <= observed_at.time() < parameters.excluded_entry_end
-    ):
-        return False
     if parameters.minimum_atr is not None and (
         atr_value is None or atr_value < parameters.minimum_atr
     ):
@@ -394,6 +397,24 @@ def _observation_allowed(row: object, parameters: BacktestParameters) -> bool:
         signal == "BEARISH"
         and parameters.bearish_rsi_max is not None
         and (rsi_value is None or rsi_value > parameters.bearish_rsi_max)
+    )
+
+
+def _within_excluded_entry_window(observed_at: datetime, parameters: BacktestParameters) -> bool:
+    """Whether ``observed_at`` falls inside ``excluded_entry_start``/
+    ``excluded_entry_end`` (start inclusive, end exclusive).
+
+    Gates opening a *new* trade only -- callers must still consider a signal
+    inside this window when it lands as a reversal that closes an existing
+    open position. Conflating the two (as an earlier version of this field
+    did, by folding the check into ``_observation_allowed``) silently turns
+    "skip entries during this hour" into "the strategy is blind to this hour
+    entirely," which understates how often positions actually get closed.
+    """
+    return (
+        parameters.excluded_entry_start is not None
+        and parameters.excluded_entry_end is not None
+        and parameters.excluded_entry_start <= observed_at.time() < parameters.excluded_entry_end
     )
 
 

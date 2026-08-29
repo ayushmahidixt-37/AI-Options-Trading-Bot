@@ -59,7 +59,7 @@ strategy variants found 10:25-11:25 IST is the single worst hour in 9 of
 of 11 while Tuesday/Friday is the worst in 9 of 11. A new candidate,
 "Skip 10:25-11:25" (`BacktestParameters.excluded_entry_start`/
 `excluded_entry_end`, new fields added for this), beats Baseline on both
-development (+23,418.35 vs +20,517.50) and validation (+2,943.25 vs
+development (+23,437.85 vs +20,517.50) and validation (+2,943.25 vs
 -626.80, with lower drawdown) over the same Jan-Mar/Apr-May split. Like
 "Morning entries," it has no test leg yet — the archive still has no
 fresh, never-analyzed range — so it's labeled **Open**, not Confirmed or

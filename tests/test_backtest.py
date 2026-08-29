@@ -8,6 +8,7 @@ from options_bot.backtest import (
     BacktestResult,
     OptionBacktestTrade,
     _observation_allowed,
+    _within_excluded_entry_window,
     export_backtest_csv,
     run_momentum_backtest,
 )
@@ -262,7 +263,7 @@ def test_capital_deployed_and_return_on_capital_are_zero_or_none_without_trades(
     assert result.return_on_capital_pct is None
 
 
-def test_observation_allowed_excludes_a_configured_mid_day_window() -> None:
+def test_within_excluded_entry_window_boundaries() -> None:
     """Motivated by a cross-strategy finding in BACKTEST_FINDINGS.md: 10:25-11:25
     was the worst hour in 9 of 11 tested variants. This is the field that lets a
     candidate skip just that window while still trading the rest of the day --
@@ -273,19 +274,32 @@ def test_observation_allowed_excludes_a_configured_mid_day_window() -> None:
         excluded_entry_end=time(11, 25),
     )
 
-    def row_at(hhmm: str) -> tuple:
-        return (f"2026-06-01T{hhmm}:00+05:30", 100.0, "BULLISH", None, None)
+    def at(hhmm: str) -> datetime:
+        hour, minute = (int(part) for part in hhmm.split(":"))
+        return datetime(2026, 6, 1, hour, minute, tzinfo=IST)
 
-    assert _observation_allowed(row_at("10:45"), params) is False
-    assert _observation_allowed(row_at("10:25"), params) is False, "start bound is inclusive"
-    assert _observation_allowed(row_at("11:24"), params) is False
-    assert _observation_allowed(row_at("11:25"), params) is True, "end bound is exclusive"
-    assert _observation_allowed(row_at("09:30"), params) is True
-    assert _observation_allowed(row_at("12:00"), params) is True
+    assert _within_excluded_entry_window(at("10:45"), params) is True
+    assert _within_excluded_entry_window(at("10:25"), params) is True, "start bound is inclusive"
+    assert _within_excluded_entry_window(at("11:24"), params) is True
+    assert _within_excluded_entry_window(at("11:25"), params) is False, "end bound is exclusive"
+    assert _within_excluded_entry_window(at("09:30"), params) is False
+    assert _within_excluded_entry_window(at("12:00"), params) is False
 
 
-def test_observation_allowed_ignores_excluded_window_unless_both_bounds_set() -> None:
+def test_within_excluded_entry_window_requires_both_bounds_set() -> None:
     params = BacktestParameters(name="X", excluded_entry_start=time(10, 25))
+
+    assert _within_excluded_entry_window(datetime(2026, 6, 1, 10, 45, tzinfo=IST), params) is False
+
+
+def test_observation_allowed_does_not_gate_on_excluded_entry_window() -> None:
+    """The reversal/exit stream must not be blind to signals inside the
+    excluded window -- see _within_excluded_entry_window's docstring and the
+    end-to-end test in test_upstox_backtest.py for the bug this guards
+    against."""
+    params = BacktestParameters(
+        name="Skip 10:25-11:25", excluded_entry_start=time(10, 25), excluded_entry_end=time(11, 25)
+    )
     row = ("2026-06-01T10:45:00+05:30", 100.0, "BULLISH", None, None)
 
     assert _observation_allowed(row, params) is True

@@ -202,12 +202,25 @@ def initialize_ledger(archive: MarketArchive) -> None:
     contract's own token. Without this filter, every option contract ever
     archived (hundreds of distinct instrument_token values, one per
     strike/expiry) would each get its own irrelevant seed row.
+
+    Also removes any such option-contract-scoped seed rows left behind by
+    an earlier version of this function that didn't have this filter --
+    an archive already upgraded once must not be stuck carrying that bloat
+    forever. Only ever deletes rows recorded under the seed's own sentinel
+    candidate name; never touches a real usage row.
     """
     with archive.connect() as con:
         scopes = con.execute(
             """SELECT DISTINCT instrument_token, timeframe FROM market_candles
                WHERE source='upstox' AND exchange_name='NSE_INDEX'"""
         ).fetchall()
+        valid_index_keys = {underlying_key for underlying_key, _ in scopes} or {""}
+        placeholders = ",".join(["?"] * len(valid_index_keys))
+        con.execute(
+            f"""DELETE FROM range_usage
+                WHERE candidate_name=? AND underlying_key NOT IN ({placeholders})""",
+            (_PRE_LEDGER_SEED_CANDIDATE, *valid_index_keys),
+        )
     for underlying_key, timeframe in scopes:
         if _fetch_all_usage(archive, underlying_key, timeframe):
             continue
