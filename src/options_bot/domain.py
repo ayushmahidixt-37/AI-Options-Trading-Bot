@@ -48,6 +48,7 @@ class PaperOrderRequest:
     stop_price: float
     strategy: str
     reason: str
+    target_price: float | None = None
 
     @property
     def units(self) -> int:

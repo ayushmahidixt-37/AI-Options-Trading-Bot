@@ -45,6 +45,23 @@ class MomentumStrategy:
             closes,
             self.atr_period,
         )
+        return self.signal_from_indicators(fast, slow, momentum, volatility)
+
+    def signal_from_indicators(
+        self, fast: float, slow: float, momentum: float | None, volatility: float | None
+    ) -> Signal | None:
+        """The decision rule alone, given already-computed indicator values.
+
+        Split out from ``evaluate`` so a caller walking many candles forward
+        (``upstox_backtest.generate_signals_from_candles``) can compute each
+        indicator series once, in one linear pass, and look up a value per
+        step here -- instead of ``evaluate`` recomputing EMA/RSI/ATR from
+        scratch over an ever-growing window on every single step, which is
+        quadratic in the number of candles and became a 12+-hour bottleneck
+        once the archive grew large (2026-08-22). Must stay in exact sync
+        with ``evaluate``'s own rule -- this *is* that rule, just callable
+        with precomputed inputs.
+        """
         if momentum is None or volatility is None or volatility <= 0:
             return None
         if fast > slow and 52 <= momentum <= 75:

@@ -1,0 +1,60 @@
+{
+  "bias": -1.486563390808921,
+  "feature_names": [
+    "rsi",
+    "atr_normalized",
+    "ema_gap_normalized",
+    "confidence",
+    "direction_is_bullish",
+    "minutes_since_open",
+    "day_of_week"
+  ],
+  "means": [
+    49.909773541218655,
+    0.0009869653206820521,
+    0.00018041250184441807,
+    0.5977455681970064,
+    0.5,
+    172.28535353535352,
+    1.9242424242424243
+  ],
+  "metadata": {
+    "base_strategy": "TrendConfirmedMomentumStrategy",
+    "candidate_name": "trend-confirmed-momentum-plus-ml",
+    "dev_range": [
+      "2024-10-03",
+      "2026-03-31"
+    ],
+    "training_row_count": 792,
+    "val_metrics_at_chosen_threshold": {
+      "max_drawdown": 6279.449999999993,
+      "net_pnl": 22091.75,
+      "profit_factor": 2.233249318249695,
+      "trades": 70,
+      "win_rate": 0.2
+    },
+    "val_range": [
+      "2026-04-01",
+      "2026-05-31"
+    ]
+  },
+  "stds": [
+    10.945102116132313,
+    0.00039142493216942967,
+    0.0003521804134523069,
+    0.04925590332627336,
+    0.5,
+    119.09599255242273,
+    1.4023134499595864
+  ],
+  "threshold": 0.11,
+  "weights": [
+    -0.06230980904639852,
+    -0.058236201613006265,
+    -0.11107087957024496,
+    0.18284529817013392,
+    -0.07273721418027405,
+    0.1745459833907817,
+    0.030234654714328606
+  ]
+}

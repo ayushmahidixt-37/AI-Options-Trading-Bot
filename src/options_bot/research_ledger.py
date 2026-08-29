@@ -195,13 +195,16 @@ def initialize_ledger(archive: MarketArchive) -> None:
     full existing candle span, so pre-ledger history can never be
     certified as an untouched test range.
 
-    Scoped to index candles only (``exchange_name='NSE_INDEX'``) -- every
-    ``check_range``/``record_usage`` call in this codebase uses the
-    underlying index as its ``underlying_key`` (see
-    ``upstox_ingest.NIFTY_UNDERLYING_KEY``), never an individual option
-    contract's own token. Without this filter, every option contract ever
-    archived (hundreds of distinct instrument_token values, one per
-    strike/expiry) would each get its own irrelevant seed row.
+    Scoped to exclude individual option-contract tokens (anything present
+    in ``instruments`` -- option-contract metadata only, never an
+    underlying index): every real ``check_range``/``record_usage`` call in
+    this codebase scopes to the underlying index token, never a specific
+    option contract, so seeding a screening row per contract is both
+    unnecessary and, once an archive has thousands of expired contracts
+    (each traded only a handful of days near its own expiry), a real
+    performance problem -- this seeding loop once took over an hour and
+    left two zombie processes contending for the same write lock before
+    this scope was added.
 
     Also removes any such option-contract-scoped seed rows left behind by
     an earlier version of this function that didn't have this filter --
@@ -212,7 +215,8 @@ def initialize_ledger(archive: MarketArchive) -> None:
     with archive.connect() as con:
         scopes = con.execute(
             """SELECT DISTINCT instrument_token, timeframe FROM market_candles
-               WHERE source='upstox' AND exchange_name='NSE_INDEX'"""
+               WHERE source='upstox'
+                 AND instrument_token NOT IN (SELECT token FROM instruments)"""
         ).fetchall()
         valid_index_keys = {underlying_key for underlying_key, _ in scopes} or {""}
         placeholders = ",".join(["?"] * len(valid_index_keys))

@@ -232,7 +232,7 @@ def pull_range(
         instruments_saved += archive.save_instruments([plan.instrument], now)
         for chunk_start, chunk_end in chunk_date_range(plan.pull_start, plan.pull_end, chunk_days):
             if not force_refetch and archive.has_upstox_candles(
-                plan.expired_instrument_key, chunk_start, chunk_end
+                plan.expired_instrument_key, chunk_start, chunk_end, timeframe
             ):
                 chunks_skipped_cached += 1
                 continue
@@ -257,7 +257,7 @@ def pull_range(
         contracts_pulled += 1
 
     for chunk_start, chunk_end in chunk_date_range(start, end, chunk_days):
-        if not force_refetch and archive.has_upstox_candles(underlying_key, chunk_start, chunk_end):
+        if not force_refetch and archive.has_upstox_candles(underlying_key, chunk_start, chunk_end, timeframe):
             chunks_skipped_cached += 1
             continue
         limiter.wait()

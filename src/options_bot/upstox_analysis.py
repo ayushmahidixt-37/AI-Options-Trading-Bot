@@ -171,7 +171,10 @@ def _atr_lookup(
     timeframe: str,
 ) -> dict[str, float]:
     """Recompute the walk-forward signal ATR values, keyed by observation timestamp."""
-    clauses = ["instrument_token=?", "source='upstox'", "timeframe=?"]
+    clauses = [
+        "instrument_token=?", "source='upstox'", "timeframe=?",
+        "derived_from_timeframe IS NULL",
+    ]
     sql_parameters: list[object] = [underlying_key, timeframe]
     if start:
         clauses.append("date(started_at)>=?")

@@ -10,6 +10,7 @@ from pathlib import Path
 from .candles import Candle
 from .config import Settings
 from .market_archive import MarketArchive
+from .market_events import is_macro_event_window
 from .strategy import MomentumStrategy
 
 
@@ -120,6 +121,76 @@ class BacktestParameters:
     cap, or the session's force-exit time -- useful for seeing a strategy's
     un-stopped behaviour before deciding what stop distance actually fits
     the instrument.
+
+    ``minimum_option_premium`` skips a trade whose selected contract's entry
+    price is below this. Found 2026-08-22 in a per-trade loss analysis: the
+    points-based stop distance (a fixed rupee budget divided by lot size)
+    can exceed a cheap option's entire premium, so the stop mathematically
+    cannot fire before the option is worthless -- these trades instead ride
+    to signal-reversal or force-exit, sometimes losing money even when the
+    price moved favorably, because the flat per-order fee alone exceeds the
+    tiny absolute gain available. See BACKTEST_FINDINGS.md's 2026-08-22 loss
+    post-mortem entry.
+
+    ``exclude_macro_event_days`` skips a signal observed on (or the trading
+    day after) a known scheduled macro event -- RBI MPC / FOMC rate
+    decisions, the Union Budget -- per ``market_events.py``. Deliberately
+    limited to *scheduled* events with a public date, not a news/sentiment
+    feed; see that module's docstring for why.
+
+    ``minimum_signal_confidence`` skips a trade whose originating signal's
+    own confidence score (0.5-0.95, computed per-strategy at signal time --
+    see each strategy's ``evaluate``/``signal_from_indicators``) is below
+    this. Uses data every strategy already computes and discards after
+    generating the trade; listed as an untested breakdown dimension in
+    BACKTEST_FINDINGS.md before being tried here.
+
+    ``minimum_open_interest`` skips a trade whose selected contract's most
+    recent known open interest (as of signal time, from the archived option
+    candles) is below this, or whose open interest is unknown entirely.
+    Only meaningful for ``run_upstox_backtest``, which is the only engine
+    with per-contract OI available before a trade is built.
+
+    ``minimum_ema_separation`` skips a trade whose originating signal's fast/
+    slow EMA gap (normalized by price, i.e. ``abs(fast-slow)/close``) is below
+    this -- trend *strength*, not just direction. Only available for
+    strategies that expose ``signal_from_indicators``/``_with_macro`` to
+    ``upstox_backtest.generate_signals_from_candles`` (a bare direction
+    crossover doesn't distinguish a 0.1-point flip from a 5-point one).
+
+    ``minimum_opening_range_pct`` skips a trade whose signal day's opening
+    range (the underlying's high-low over the first ``opening_range_bars``
+    candles) is narrower than this fraction of spot -- the flip side of the
+    filter built for the short-strangle engine (there, a *narrow* opening
+    range selects calm days worth selling premium on; here, a *wide* one is
+    tested as a possible signal for days worth trading trend/breakout
+    strategies on). No lookahead: a signal observed before the opening
+    range has actually finished forming is skipped outright (fails closed),
+    since the range's width genuinely isn't knowable yet at that point --
+    it is not simply assumed narrow or evaluated against a partial range.
+
+    ``trailing_activation_return`` delays ``trailing_stop`` from ratcheting
+    until the position has actually reached this unrealized return -- before
+    that, only the fixed initial stop applies. Without this, trailing_stop
+    starts tightening from the very first candle (peak_price starts at the
+    entry fill), which can clip a winner on ordinary early noise before it
+    has proven itself. Combine with ``target_return=None`` for a "let it run,
+    protect the gain once it's real" exit instead of a hard profit cap --
+    the position is never forced out at a fixed target, only once it pulls
+    back from its own peak by ``trailing_stop`` after clearing the
+    activation threshold.
+
+    ``minimum_implied_volatility``/``maximum_implied_volatility`` skip a
+    trade whose selected contract's implied volatility (as of the entry
+    candle, from DhanHQ's historical IV -- see ``dhan_ingest.py``'s
+    ``backfill_iv_for_weekly_cycle``) falls outside this range. A contract
+    with IV recorded as exactly ``0`` is treated as unknown (fails closed,
+    not as "very low IV") -- Dhan's own historical feed returns 0 for
+    illiquid/edge-case moments it apparently couldn't price, about 6.4% of
+    all backfilled rows; see BACKTEST_FINDINGS.md's 2026-08-24 IV entry for
+    the data-quality check performed before trusting this field. Only
+    meaningful for ``run_upstox_backtest`` with ``include_dhan=True`` --
+    Upstox-sourced candles never populate this column.
     """
 
     name: str = "Baseline"
@@ -135,7 +206,17 @@ class BacktestParameters:
     maximum_hold_minutes: int | None = None
     target_return: float | None = None
     trailing_stop: float | None = None
+    minimum_option_premium: float | None = None
+    exclude_macro_event_days: bool = False
     allowed_weekdays: tuple[int, ...] | None = None
+    minimum_signal_confidence: float | None = None
+    minimum_open_interest: float | None = None
+    minimum_ema_separation: float | None = None
+    trailing_activation_return: float | None = None
+    minimum_opening_range_pct: float | None = None
+    opening_range_bars: int = 6
+    minimum_implied_volatility: float | None = None
+    maximum_implied_volatility: float | None = None
 
 
 def run_momentum_backtest(
@@ -296,7 +377,9 @@ def run_momentum_backtest(
                 )
             )
 
-    return build_backtest_result(trades, archive, settings, trading_days, source="angel-one")
+    return build_backtest_result(
+        trades, archive, settings, trading_days, source="angel-one", start=start, end=end
+    )
 
 
 def build_backtest_result(
@@ -305,12 +388,17 @@ def build_backtest_result(
     settings: Settings | None,
     trading_days: int,
     source: str = "angel-one",
+    start: date | None = None,
+    end: date | None = None,
 ) -> BacktestResult:
     """Aggregate trades into a ``BacktestResult``, shared by every replay engine.
 
     ``source`` scopes the data-quality gap check to the engine's own data
     (``"angel-one"`` or ``"upstox"``) so a gap in one source never marks the
-    other source's backtest status as impaired.
+    other source's backtest status as impaired. ``start``/``end`` scope it
+    further to the range actually being backtested -- without this the gap
+    count (and therefore ``DATA QUALITY WARNING``) reflects the whole
+    archive, not the requested range; see ``gap_summary``'s docstring.
     """
     if not trades:
         return BacktestResult(
@@ -340,7 +428,7 @@ def build_backtest_result(
     losses = abs(sum(value for value in net_values if value < 0))
     profit_factor = gains / losses if losses else None
     fees_paid = len(trades) * 2 * settings.paper_fee_per_order if settings else 0.0
-    gaps = sum(int(item["gaps"]) for item in archive.gap_summary(source))
+    gaps = sum(int(item["gaps"]) for item in archive.gap_summary(source, start, end))
     status = (
         "VALIDATION READY"
         if trading_days >= 20 and len(trades) >= 30 and gaps == 0
@@ -388,6 +476,8 @@ def _observation_allowed(row: object, parameters: BacktestParameters) -> bool:
     if parameters.minimum_atr is not None and (
         atr_value is None or atr_value < parameters.minimum_atr
     ):
+        return False
+    if parameters.exclude_macro_event_days and is_macro_event_window(observed_at.date()):
         return False
     if signal == "BULLISH" and parameters.bullish_rsi_min is not None and (
         rsi_value is None or rsi_value < parameters.bullish_rsi_min

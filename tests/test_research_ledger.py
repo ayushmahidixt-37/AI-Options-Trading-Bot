@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from options_bot.domain import Instrument
 from options_bot.market_archive import MarketArchive
 from options_bot.research_ledger import (
     RangeUsage,
@@ -351,10 +352,11 @@ def test_initialize_ledger_seeds_a_conservative_row_from_existing_candles(tmp_pa
 
 def test_initialize_ledger_does_not_seed_a_row_per_option_contract(tmp_path: Path) -> None:
     """Regression test: a real archive has hundreds of distinct option-contract
-    instrument_token values (one per strike/expiry, exchange_name='NFO'). Only
-    the underlying index (exchange_name='NSE_INDEX') is ever used as a
-    check_range/record_usage scope -- seeding one row per option contract
-    would flood the ledger with rows nothing ever queries."""
+    instrument_token values (one per strike/expiry). Only the underlying index
+    is ever used as a check_range/record_usage scope -- seeding one row per
+    option contract would flood the ledger with rows nothing ever queries.
+    Scoping is by exclusion (anything registered in `instruments`), so the
+    contract must be registered there, exactly like a real archive would."""
     store = archive(tmp_path)
     _seed_candles(store, date(2026, 8, 3))
     option_start = datetime(2026, 8, 3, 9, 20, tzinfo=IST)
@@ -362,6 +364,11 @@ def test_initialize_ledger_does_not_seed_a_row_per_option_contract(tmp_path: Pat
     store.save_upstox_candles(
         option_candles, token="NSE_FO|1|13-08-2026", exchange="NFO",
         timeframe=TIMEFRAME, collected_at=option_start,
+    )
+    store.save_instruments(
+        [Instrument("NIFTY24600CE", "NSE_FO|1|13-08-2026", "NFO", "NIFTY",
+                     "CE", 75, date(2026, 8, 13), 24600)],
+        option_start,
     )
 
     initialize_ledger(store)
@@ -427,6 +434,37 @@ def test_initialize_ledger_is_idempotent_and_does_not_overwrite_real_history(tmp
     rows = research_context_for_evaluation(store)["usage_history"]
     assert len(rows) == 1, "seeding must be a no-op once real history already exists for the scope"
     assert rows[0]["candidate_name"] == "Baseline"
+
+
+def test_initialize_ledger_skips_option_contract_tokens(tmp_path: Path) -> None:
+    """Regression test: seeding must scope to the underlying index only, not
+    every individual option-contract token. Every real check_range/
+    record_usage call in this codebase scopes to the underlying index, never
+    a specific contract -- seeding a screening row per contract is wasted
+    work that becomes a real performance problem once an archive holds
+    thousands of expired contracts (this once made initialize_ledger take
+    over an hour and left two processes deadlocked on the write lock).
+    """
+    from options_bot.domain import Instrument
+
+    store = archive(tmp_path)
+    _seed_candles(store, date(2026, 8, 3))
+    option_token = "NSE_FO|1|13-08-2026"
+    store.save_instruments(
+        [Instrument("NIFTY13AUG2626600CE", option_token, "NFO", "NIFTY", "CE", 75, date(2026, 8, 13), 100)],
+        datetime(2026, 8, 3, 9, 15, tzinfo=IST),
+    )
+    store.save_upstox_candles(
+        [UpstoxCandle("NIFTY13AUG2626600CE", datetime(2026, 8, 3, 9, 15, tzinfo=IST), 100, 102, 99, 101)],
+        token=option_token, exchange="NFO", timeframe=TIMEFRAME, collected_at=datetime(2026, 8, 3, 9, 15, tzinfo=IST),
+    )
+
+    initialize_ledger(store)
+
+    rows = research_context_for_evaluation(store)["usage_history"]
+    seeded_tokens = {row["underlying_key"] for row in rows}
+    assert UNDERLYING in seeded_tokens
+    assert option_token not in seeded_tokens
 
 
 def test_resolve_and_has_underlying_data(tmp_path: Path) -> None:

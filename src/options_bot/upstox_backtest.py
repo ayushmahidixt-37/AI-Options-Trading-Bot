@@ -22,6 +22,7 @@ from .backtest import (
 )
 from .candles import Candle
 from .config import Settings
+from .indicators import atr_series, ema
 from .indicators import rsi as compute_rsi
 from .market_archive import MarketArchive
 from .strategy import MomentumStrategy
@@ -38,6 +39,7 @@ class SyntheticObservation:
     rsi: float | None
     atr: float
     confidence: float
+    ema_gap_normalized: float | None = None
 
 
 def generate_signals_from_candles(
@@ -45,26 +47,98 @@ def generate_signals_from_candles(
 ) -> list[SyntheticObservation]:
     """Walk candles forward, evaluating only on data known at each point.
 
-    Mirrors ``replay_underlying``'s ``candles[:index]`` slicing so no signal
-    ever sees a future candle, and only emits when the direction changes from
-    the last emitted signal (matching the live monitor's fresh-signal
-    deduplication convention).
+    No signal ever sees a future candle: at step ``index``, only
+    ``candles[:index]`` (i.e. everything up to and including
+    ``candles[index-1]``) has been used. Only emits when the direction
+    changes from the last emitted signal (matching the live monitor's
+    fresh-signal deduplication convention).
+
+    Every indicator series is computed once, in one linear pass, rather than
+    recomputing EMA/RSI/ATR from scratch over an ever-growing prefix on
+    every step -- the latter is quadratic in the number of candles and
+    became a real, multi-hour bottleneck once the archive grew large (found
+    2026-08-22 training the ML filter on the extended history). ``ema``/
+    ``rsi`` are already pure left-to-right recursions, so ``series[k]`` is
+    exactly what ``strategy.evaluate`` would compute from ``candles[:k+1]``
+    -- computing them once for the whole array and indexing in is provably
+    identical, not an approximation; see ``indicators.atr_series``'s
+    docstring for the same argument applied to ATR (previously only
+    available as a recompute-from-scratch scalar).
+
+    Only used for a strategy that exposes ``signal_from_indicators`` (real
+    ``MomentumStrategy``, whose period attributes this needs to compute the
+    series) or ``signal_from_indicators_with_macro`` (same idea, plus one
+    extra macro-trend EMA series, for ``TrendConfirmedMomentumStrategy``).
+    Anything else -- a test double scripting ``evaluate`` directly, for
+    instance -- falls back to the original, slower per-step call, which is
+    fine at test scale and keeps this optimization from ever silently
+    changing what a custom strategy sees.
     """
     observations: list[SyntheticObservation] = []
     last_signal: str | None = None
+    if len(candles) <= strategy.minimum_candles:
+        return observations
+
+    if hasattr(strategy, "signal_from_indicators_with_macro"):
+        closes = [item.close for item in candles]
+        highs = [item.high for item in candles]
+        lows = [item.low for item in candles]
+        fast_series = ema(closes, strategy.fast_period)
+        slow_series = ema(closes, strategy.slow_period)
+        macro_series = ema(closes, strategy.macro_period)
+        rsi_series = compute_rsi(closes, strategy.rsi_period)
+        atr_values = atr_series(highs, lows, closes, strategy.atr_period)
+
+        def signal_at(index: int) -> tuple:
+            fast_value = fast_series[index - 1]
+            slow_value = slow_series[index - 1]
+            close_value = closes[index - 1]
+            gap = abs(fast_value - slow_value) / close_value if close_value else 0.0
+            return (
+                strategy.signal_from_indicators_with_macro(
+                    fast_value, slow_value, macro_series[index - 1],
+                    rsi_series[index - 1], atr_values[index - 1], close_value,
+                ),
+                rsi_series[index - 1],
+                gap,
+            )
+    elif hasattr(strategy, "signal_from_indicators"):
+        closes = [item.close for item in candles]
+        highs = [item.high for item in candles]
+        lows = [item.low for item in candles]
+        fast_series = ema(closes, strategy.fast_period)
+        slow_series = ema(closes, strategy.slow_period)
+        rsi_series = compute_rsi(closes, strategy.rsi_period)
+        atr_values = atr_series(highs, lows, closes, strategy.atr_period)
+
+        def signal_at(index: int) -> tuple:
+            fast_value = fast_series[index - 1]
+            slow_value = slow_series[index - 1]
+            close_value = closes[index - 1]
+            gap = abs(fast_value - slow_value) / close_value if close_value else 0.0
+            return (
+                strategy.signal_from_indicators(
+                    fast_value, slow_value,
+                    rsi_series[index - 1], atr_values[index - 1],
+                ),
+                rsi_series[index - 1],
+                gap,
+            )
+    else:
+        def signal_at(index: int) -> tuple:
+            window = candles[:index]
+            closes = [item.close for item in window]
+            return strategy.evaluate(window), compute_rsi(closes, strategy.rsi_period)[-1], None
+
     for index in range(strategy.minimum_candles, len(candles)):
-        window = candles[:index]
-        signal = strategy.evaluate(window)
+        signal, rsi_value, ema_gap = signal_at(index)
         if signal is None:
             continue
         label = signal.direction.value.upper()
         if label == last_signal:
             continue
         last_signal = label
-        closes = [item.close for item in window]
-        rsi_series = compute_rsi(closes, strategy.rsi_period)
-        rsi_value = rsi_series[-1] if rsi_series else None
-        decision_candle = window[-1]
+        decision_candle = candles[index - 1]
         observations.append(
             SyntheticObservation(
                 observed_at=decision_candle.started_at,
@@ -73,6 +147,7 @@ def generate_signals_from_candles(
                 rsi=rsi_value,
                 atr=signal.stop_distance,
                 confidence=signal.confidence,
+                ema_gap_normalized=ema_gap,
             )
         )
     return observations
@@ -87,16 +162,59 @@ def run_upstox_backtest(
     parameters: BacktestParameters | None = None,
     underlying_key: str = NIFTY_UNDERLYING_KEY,
     timeframe: str = "FIVE_MINUTE",
+    include_derived: bool = False,
+    include_dhan: bool = False,
+    dhan_only: bool = False,
 ) -> BacktestResult:
     """Replay Upstox-sourced underlying and option candles for backtesting.
 
     Only reads ``market_candles``/``instruments`` rows tagged ``source='upstox'``
     — Angel-sourced data in the same archive is never touched or mixed in.
+    By default also excludes any candle tagged ``derived_from_timeframe``
+    (resampled from a finer timeframe rather than fetched directly from
+    Upstox) so a research script materializing derived candles elsewhere in
+    the archive can never silently change this engine's results — see
+    ``save_upstox_candles``'s docstring and ``BACKTEST_FINDINGS.md``'s
+    2026-08-21 data-integrity entry, where exactly that happened.
+
+    Pass ``include_derived=True`` to knowingly include derived candles too
+    — e.g. to backtest a period real Upstox data was never pulled for, using
+    only candles resampled from already-archived, real, finer-grained data.
+    Only opt into this for a range/analysis you're explicitly labeling as
+    using derived data; never as the silent default.
+
+    Pass ``include_dhan=True`` to also read DhanHQ-reconstructed candles
+    (``source='dhan'``) alongside real Upstox ones — e.g. to backtest the
+    2020-08..2024-10 period Upstox itself has no data for. Dhan option
+    candles are reconstructed from a wide ATM-relative band, not fetched
+    per-contract the way Upstox data is; see ``dhan_ingest.py``'s module
+    docstring and BACKTEST_FINDINGS.md's 2026-08-23/24 entries for the
+    validation performed before trusting this. Only opt into this for a
+    range/analysis explicitly labeling itself as using Dhan-reconstructed
+    data; never as the silent default.
+
+    Pass ``dhan_only=True`` (with ``include_dhan=True``) to read *only*
+    ``source='dhan'`` rows for the option legs, even for a range where real
+    Upstox option data also exists for the same real contracts -- the
+    underlying/index query is unaffected (still ``source IN
+    ('upstox','dhan')``), since the underlying is stored under one shared
+    token regardless of source and has no equivalent ambiguity. Needed
+    2026-08-24 to test Dhan-reconstructed implied volatility (which Upstox
+    never captures) against a period Upstox already covers for options:
+    without this, a real Upstox contract and a Dhan-reconstructed one for
+    the identical strike/expiry would both appear as candidate option rows
+    with the same ``ABS(strike-spot)`` distance, and which one gets picked
+    becomes an arbitrary SQL tie-break rather than a controlled choice.
     """
     strategy = strategy or MomentumStrategy()
     variant = parameters or BacktestParameters()
+    derived_filter = "" if include_derived else " AND derived_from_timeframe IS NULL"
+    source_clause = "source IN ('upstox','dhan')" if include_dhan else "source='upstox'"
+    option_source_clause = "source='dhan'" if dhan_only else source_clause
     with archive.connect() as con:
-        clauses = ["instrument_token=?", "source='upstox'", "timeframe=?"]
+        clauses = ["instrument_token=?", source_clause, "timeframe=?"]
+        if not include_derived:
+            clauses.append("derived_from_timeframe IS NULL")
         sql_parameters: list[object] = [underlying_key, timeframe]
         if start:
             clauses.append("date(started_at)>=?")
@@ -123,6 +241,43 @@ def run_upstox_backtest(
         ]
         trading_days = len({candle.started_at.date() for candle in underlying_candles})
 
+        # (opening_range_pct, close_time_of_the_range) -- a signal observed
+        # before the range has actually closed can't use this value without
+        # lookahead, so callers must also check observed_at against the
+        # stored close time (see the filter below).
+        opening_range_by_day: dict[object, tuple[float, datetime]] = {}
+        if variant.minimum_opening_range_pct is not None:
+            candles_by_day: dict[object, list[Candle]] = {}
+            for candle in underlying_candles:
+                candles_by_day.setdefault(candle.started_at.date(), []).append(candle)
+            for day, day_candles in candles_by_day.items():
+                day_candles.sort(key=lambda c: c.started_at)
+                opening = day_candles[: variant.opening_range_bars]
+                if len(opening) < variant.opening_range_bars:
+                    continue
+                range_low = min(c.low for c in opening)
+                range_high = max(c.high for c in opening)
+                if range_low > 0:
+                    opening_range_by_day[day] = ((range_high - range_low) / range_low, opening[-1].started_at)
+
+        # The set of instrument tokens with usable Upstox candles is constant
+        # for the whole run -- computing it once into a temp table (instead of
+        # a fresh full-table DISTINCT scan inside the per-observation contract
+        # query below) avoids re-scanning all of market_candles once per
+        # signal, which becomes minutes-per-call once the archive is large
+        # (e.g. the 2026-08-21 archive-extension work: a 15-month backtest
+        # against a multi-million-row archive went from effectively hanging
+        # to seconds after this fix).
+        con.execute("DROP TABLE IF EXISTS temp.available_upstox_tokens")
+        con.execute(
+            f"""CREATE TEMP TABLE available_upstox_tokens AS
+                SELECT DISTINCT instrument_token FROM market_candles
+                WHERE {option_source_clause}{derived_filter}"""
+        )
+        con.execute(
+            "CREATE INDEX temp.available_upstox_tokens_idx ON available_upstox_tokens(instrument_token)"
+        )
+
         raw_observations = generate_signals_from_candles(underlying_candles, strategy)
         observations = [
             observation
@@ -144,14 +299,30 @@ def run_upstox_backtest(
             observed_at = observation.observed_at
             if _within_excluded_entry_window(observed_at, variant):
                 continue
+            if (
+                variant.minimum_signal_confidence
+                and observation.confidence < variant.minimum_signal_confidence
+            ):
+                continue
+            if variant.minimum_ema_separation and (
+                observation.ema_gap_normalized is None
+                or observation.ema_gap_normalized < variant.minimum_ema_separation
+            ):
+                continue
+            if variant.minimum_opening_range_pct is not None:
+                day_range = opening_range_by_day.get(observed_at.date())
+                if (
+                    day_range is None
+                    or observed_at <= day_range[1]  # signal fires before the range even closed -- can't use it
+                    or day_range[0] < variant.minimum_opening_range_pct
+                ):
+                    continue
             option_type = "CE" if observation.signal == "BULLISH" else "PE"
             contract = con.execute(
                 """SELECT i.token, i.lot_size, i.symbol, i.expiry
                    FROM instruments i
                    WHERE i.underlying='NIFTY' AND i.option_type=? AND i.expiry>=date(?)
-                     AND i.token IN (
-                         SELECT DISTINCT instrument_token FROM market_candles WHERE source='upstox'
-                     )
+                     AND i.token IN (SELECT instrument_token FROM available_upstox_tokens)
                    ORDER BY i.expiry, ABS(i.strike-?) LIMIT 1""",
                 (option_type, observed_at.isoformat(), observation.spot),
             ).fetchone()
@@ -160,13 +331,34 @@ def run_upstox_backtest(
             if variant.exclude_expiry_day and contract[3] == observed_at.date().isoformat():
                 continue
             entry = con.execute(
-                """SELECT started_at, open FROM market_candles
-                   WHERE instrument_token=? AND source='upstox' AND started_at>? AND date(started_at)=?
+                f"""SELECT started_at, open, implied_volatility FROM market_candles
+                   WHERE instrument_token=? AND {option_source_clause} AND timeframe=?{derived_filter}
+                     AND started_at>? AND date(started_at)=?
                    ORDER BY started_at LIMIT 1""",
-                (contract[0], observed_at.isoformat(), observed_at.date().isoformat()),
+                (contract[0], timeframe, observed_at.isoformat(), observed_at.date().isoformat()),
             ).fetchone()
             if entry is None:
                 continue
+            if variant.minimum_option_premium and float(entry[1]) < variant.minimum_option_premium:
+                continue
+            if variant.minimum_implied_volatility or variant.maximum_implied_volatility:
+                entry_iv = float(entry[2]) if entry[2] is not None and float(entry[2]) > 0 else None
+                if entry_iv is None:
+                    continue
+                if variant.minimum_implied_volatility and entry_iv < variant.minimum_implied_volatility:
+                    continue
+                if variant.maximum_implied_volatility and entry_iv > variant.maximum_implied_volatility:
+                    continue
+            if variant.minimum_open_interest:
+                oi_row = con.execute(
+                    f"""SELECT open_interest FROM market_candles
+                       WHERE instrument_token=? AND {option_source_clause} AND timeframe=?{derived_filter}
+                         AND started_at<=? ORDER BY started_at DESC LIMIT 1""",
+                    (contract[0], timeframe, observed_at.isoformat()),
+                ).fetchone()
+                open_interest = float(oi_row[0]) if oi_row is not None and oi_row[0] is not None else None
+                if open_interest is None or open_interest < variant.minimum_open_interest:
+                    continue
             force_exit = settings.force_exit if settings else time(15, 20)
             session_exit = datetime.combine(
                 observed_at.date(), force_exit, tzinfo=observed_at.tzinfo
@@ -183,8 +375,9 @@ def run_upstox_backtest(
                 timed_exit = hold_exit.isoformat() < next_observed
                 next_observed = min(next_observed, hold_exit.isoformat())
             path = con.execute(
-                """SELECT started_at, open, high, low, close FROM market_candles
-                   WHERE instrument_token=? AND source='upstox' AND started_at>=? AND started_at<=?
+                f"""SELECT started_at, open, high, low, close FROM market_candles
+                   WHERE instrument_token=? AND {option_source_clause}{derived_filter}
+                     AND started_at>=? AND started_at<=?
                    ORDER BY started_at""",
                 (contract[0], entry[0], next_observed),
             ).fetchall()
@@ -210,6 +403,7 @@ def run_upstox_backtest(
             if settings and stop > 0:
                 active_stop = stop
                 peak_price = buy_fill
+                trailing_active = variant.trailing_activation_return is None
                 for candle in path:
                     if float(candle[1]) <= active_stop:
                         selected_exit, exit_price, exit_reason = (
@@ -230,7 +424,13 @@ def run_upstox_backtest(
                         selected_exit, exit_price, exit_reason = candle, target, "target"
                         break
                     peak_price = max(peak_price, float(candle[2]))
-                    if variant.trailing_stop:
+                    if (
+                        not trailing_active
+                        and variant.trailing_activation_return
+                        and peak_price >= buy_fill * (1 + variant.trailing_activation_return)
+                    ):
+                        trailing_active = True
+                    if variant.trailing_stop and trailing_active:
                         active_stop = max(
                             active_stop, peak_price * (1 - variant.trailing_stop)
                         )
@@ -256,4 +456,6 @@ def run_upstox_backtest(
                     raw_points=round(exit_price - float(entry[1]), 2),
                 )
             )
-    return build_backtest_result(trades, archive, settings, trading_days, source="upstox")
+    return build_backtest_result(
+        trades, archive, settings, trading_days, source="upstox", start=start, end=end
+    )
