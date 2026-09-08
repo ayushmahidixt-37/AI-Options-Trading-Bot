@@ -91,10 +91,12 @@ import s07_iron_condor  # noqa: E402
 import s10_short_straddle_920  # noqa: E402
 import s12_straddle_breakeven_banknifty  # noqa: E402
 
-from .config import Settings  # noqa: E402
+from .config import Settings, load_env_file  # noqa: E402
 from .connections import ConnectionManager, ConnectionActionError  # noqa: E402
 from .domain import Instrument  # noqa: E402
 from .clock import MarketClock  # noqa: E402
+
+DEFAULT_CONFIG_PATH = REPO_ROOT / "local-bot.env"
 
 # ----------------------------------------------------------------- config
 ACTIVE_STRATEGIES = [
@@ -636,12 +638,28 @@ def run_two_leg_stop_strategy(strategy_name: str, ledger: LiveLedger, connection
             day_state["phase"] = "done"
 
 
-def main():
+def main(argv=None):
     """Bootstraps a paper-only ConnectionManager and runs run_cycle() every
     CYCLE_SECONDS during market hours. Safety: Settings.validate() (inside
     ConnectionManager's Settings.from_env()) already refuses to construct
     unless trading_mode=='paper' and live_trading_enabled is False -- this
-    is enforced upstream of this file, not re-implemented here."""
+    is enforced upstream of this file, not re-implemented here.
+
+    Loads local-bot.env first (same non-secret config the rest of this
+    project's CLI uses via `_settings()` in cli.py) -- without this,
+    Settings.from_env() would read a near-empty environment and silently
+    fail to find real credentials/paths rather than what's actually
+    configured for this machine."""
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", default=str(DEFAULT_CONFIG_PATH),
+                     help="path to the non-secret bot.env-style config file")
+    args = ap.parse_args(argv)
+    if Path(args.config).is_file():
+        load_env_file(Path(args.config))
+    else:
+        print(f"WARNING: config file {args.config} not found -- "
+              f"relying on whatever is already in the environment")
     settings = Settings.from_env()
     assert settings.trading_mode == "paper" and not settings.live_trading_enabled, (
         "live_paper_runner refuses to start outside paper mode"
