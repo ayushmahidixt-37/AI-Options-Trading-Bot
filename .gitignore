@@ -29,3 +29,7 @@ build/
 *.egg-info/
 clean_room/data/
 data_ingest/data/*.sqlite3
+
+# Generated backtest trade dumps -- large, reproducible by re-running the
+# strategy scripts. Reports/config (the reviewable artifacts) stay tracked.
+Backtest Stratergies/results/
