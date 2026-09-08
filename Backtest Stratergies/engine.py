@@ -227,6 +227,46 @@ def bs_delta(spot, strike, t_years, iv_pct, option_type):
     return _norm_cdf(d1) if option_type == "CE" else _norm_cdf(d1) - 1.0
 
 
+def _bs_price(spot, strike, t_years, sigma, option_type):
+    if t_years <= 0 or sigma <= 0:
+        return max(0.0, (spot - strike) if option_type == "CE" else (strike - spot))
+    d1 = ((math.log(spot / strike) + (RISK_FREE + 0.5 * sigma * sigma) * t_years)
+          / (sigma * math.sqrt(t_years)))
+    d2 = d1 - sigma * math.sqrt(t_years)
+    if option_type == "CE":
+        return spot * _norm_cdf(d1) - strike * math.exp(-RISK_FREE * t_years) * _norm_cdf(d2)
+    return strike * math.exp(-RISK_FREE * t_years) * _norm_cdf(-d2) - spot * _norm_cdf(-d1)
+
+
+def implied_vol(price, spot, strike, t_years, option_type, tol=1e-4, max_iter=60):
+    """Invert Black-Scholes by bisection: given a real traded premium (e.g.
+    a live quote, where -- unlike this backtest's archive -- no IV field is
+    available), recover the IV that produces it, for use with bs_delta.
+    Bisection rather than Newton: no derivative needed, and it can't
+    diverge, which matters more than speed for the handful of calls/cycle
+    this is used for live. Returns None if the price is outside any
+    achievable range (e.g. below intrinsic) rather than returning a
+    nonsense value."""
+    if t_years <= 0 or spot <= 0 or strike <= 0 or price <= 0:
+        return None
+    intrinsic = max(0.0, (spot - strike) if option_type == "CE" else (strike - spot))
+    if price < intrinsic - 1e-6:
+        return None
+    lo, hi = 1e-4, 5.0  # 0.01% to 500% annualized vol -- generous bracket
+    if _bs_price(spot, strike, t_years, hi, option_type) < price:
+        return None  # price implies vol beyond the bracket; refuse rather than guess
+    for _ in range(max_iter):
+        mid = (lo + hi) / 2
+        est = _bs_price(spot, strike, t_years, mid, option_type)
+        if abs(est - price) < tol:
+            return mid * 100.0  # percent, matching bs_delta's stored-IV convention
+        if est < price:
+            lo = mid
+        else:
+            hi = mid
+    return mid * 100.0
+
+
 def years_to_expiry(expiry: date, at: datetime) -> float:
     expiry_dt = datetime(expiry.year, expiry.month, expiry.day, 15, 30, tzinfo=IST)
     return max((expiry_dt - at).total_seconds(), 0.0) / (365 * 24 * 3600)

@@ -33,3 +33,6 @@ data_ingest/data/*.sqlite3
 # Generated backtest trade dumps -- large, reproducible by re-running the
 # strategy scripts. Reports/config (the reviewable artifacts) stay tracked.
 Backtest Stratergies/results/
+
+# Live paper-trading runtime ledger -- generated output, not source.
+live_paper_trading/
