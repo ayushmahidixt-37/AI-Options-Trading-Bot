@@ -120,6 +120,7 @@ POLL_SECONDS = 15             # how often the spot price is sampled into bars --
                                # historical day before trusting this at all.
 LEDGER_PATH = REPO_ROOT / "live_paper_trading" / "ledger.jsonl"
 STATE_PATH = REPO_ROOT / "live_paper_trading" / "state.json"
+STATUS_PATH = REPO_ROOT / "live_paper_trading" / "status.json"  # read by live_dashboard.py
 
 
 # ------------------------------------------------------------------ ledger
@@ -687,8 +688,27 @@ def main(argv=None):
                     run_cycle(ledger, buffer, connections, now)
                 except Exception as exc:  # keep the loop alive across single-cycle errors
                     print(f"cycle error: {exc}")
+                write_status(ledger, now, connections)
                 last_cycle_at = now
         time_module.sleep(POLL_SECONDS)
+
+
+def write_status(ledger: LiveLedger, now: datetime, connections) -> None:
+    """Written every cycle so live_dashboard.py (a separate, read-only
+    process) can show whether the runner is actually alive and current,
+    not just what the ledger last happened to contain."""
+    today = now.date()
+    today_realized = sum(t.net_rupees for t in ledger.trades.values()
+                          if t.status == "closed" and t.entry_at[:10] == today.isoformat())
+    STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    STATUS_PATH.write_text(json.dumps({
+        "last_run_at": now.isoformat(),
+        "active_strategies": ACTIVE_STRATEGIES,
+        "nifty_price": connections.snapshot().nifty_price,
+        "open_positions": len(ledger.all_open()),
+        "today_realized_pnl": round(today_realized, 2),
+        "total_realized_pnl": round(ledger.realized_pnl(), 2),
+    }), encoding="utf-8")
 
 
 def run_cycle(ledger: LiveLedger, buffer: LiveBarBuffer, connections, now: datetime):
