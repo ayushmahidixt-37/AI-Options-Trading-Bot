@@ -204,6 +204,39 @@ def _quote_price(response: object) -> float:
     return price
 
 
+def _quote_open_interest_by_token(response: object) -> dict[str, float]:
+    """Map ``symbolToken`` -> open interest from a ``getMarketData("FULL", ...)``
+    response. Angel's historical-candle endpoint (used for the actual
+    candles) never returns OI, so this is the only place in the live path
+    that can observe it. Defensive on field-name casing since this has never
+    been exercised against the real API from this codebase before; returns
+    an empty mapping (never raises) for anything that doesn't match the
+    expected shape, so a format surprise degrades to "no OI this cycle"
+    rather than breaking candle archiving.
+    """
+    if not isinstance(response, dict):
+        return {}
+    data = response.get("data")
+    fetched = data.get("fetched") if isinstance(data, dict) else None
+    if not isinstance(fetched, list):
+        return {}
+    result: dict[str, float] = {}
+    for row in fetched:
+        if not isinstance(row, dict):
+            continue
+        token = row.get("symbolToken") or row.get("symboltoken")
+        oi = row.get("opnInterest", row.get("openInterest", row.get("oi")))
+        if token is None or oi is None:
+            continue
+        try:
+            value = float(oi)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            result[str(token)] = value
+    return result
+
+
 def _parse_candle_timestamp(value: object, timezone: tzinfo) -> datetime:
     timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     if timestamp.tzinfo is None:
@@ -483,6 +516,21 @@ class ConnectionManager:
 
         saved = 0
         failures: list[str] = []
+        open_interest_by_token: dict[str, float] = {}
+        try:
+            tokens_by_exchange: dict[str, list[str]] = {}
+            for contract in contracts:
+                tokens_by_exchange.setdefault(contract.exchange, []).append(contract.token)
+            for exchange, tokens in tokens_by_exchange.items():
+                oi_response = getattr(smart_api, "getMarketData")("FULL", {exchange: tokens})
+                open_interest_by_token.update(_quote_open_interest_by_token(oi_response))
+        except Exception as exc:
+            # Best-effort only: Candidate B's open-interest gate (see
+            # CANDIDATE_B_MINIMUM_OPEN_INTEREST) simply won't clear for this
+            # cycle's candles if OI can't be fetched -- candle archiving
+            # itself must still proceed either way.
+            failures.append(f"open interest: {_safe_detail(str(exc), ())}")
+
         for index, contract in enumerate(contracts):
             if index:
                 self._request_pause(0.4)
@@ -514,6 +562,11 @@ class ConnectionManager:
                     timeframe=NIFTY_CANDLE_INTERVAL,
                     collected_at=now,
                 )
+                open_interest = open_interest_by_token.get(contract.token)
+                if open_interest is not None:
+                    self.archive.set_latest_open_interest(
+                        contract.token, NIFTY_CANDLE_INTERVAL, open_interest, now
+                    )
             except Exception as exc:
                 failures.append(f"{contract.symbol}: {_safe_detail(str(exc), ())}")
 

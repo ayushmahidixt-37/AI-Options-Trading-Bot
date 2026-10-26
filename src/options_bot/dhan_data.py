@@ -174,13 +174,13 @@ class DhanClient:
                     strike=float(s),
                     open=float(o),
                     high=float(h) if h is not None else None,
-                    low=float(l) if l is not None else None,
+                    low=float(lo) if lo is not None else None,
                     close=float(c),
                     volume=float(v) if v is not None else None,
                     open_interest=float(oi) if oi is not None else None,
                     implied_volatility=float(iv) if iv is not None else None,
                 )
-                for t, s, o, h, l, c, v, oi, iv in zip(
+                for t, s, o, h, lo, c, v, oi, iv in zip(
                     side["timestamp"], side["strike"], side["open"], highs, lows, side["close"], volumes, ois, ivs
                 )
             ]
@@ -237,9 +237,9 @@ class DhanClient:
             return [
                 DhanIndexPoint(
                     started_at=datetime.fromtimestamp(t, tz=IST),
-                    open=float(o), high=float(h), low=float(l), close=float(c),
+                    open=float(o), high=float(h), low=float(lo), close=float(c),
                 )
-                for t, o, h, l, c in zip(
+                for t, o, h, lo, c in zip(
                     payload["timestamp"], payload["open"], payload["high"], payload["low"], payload["close"]
                 )
             ]

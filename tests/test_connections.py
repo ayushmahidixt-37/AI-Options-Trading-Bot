@@ -342,6 +342,8 @@ def test_collects_bounded_nearest_expiry_option_candles(tmp_path: Path) -> None:
     now = datetime(2026, 8, 6, 13, 53, tzinfo=IST)
     requests: list[str] = []
 
+    market_data_calls: list[tuple[str, dict[str, list[str]]]] = []
+
     class FakeApi:
         def generateSession(self, *_args):
             return {"status": True, "data": {"jwtToken": "secret"}}
@@ -349,6 +351,18 @@ def test_collects_bounded_nearest_expiry_option_candles(tmp_path: Path) -> None:
         def getCandleData(self, payload):
             requests.append(payload["symboltoken"])
             return {"status": True, "data": candle_rows(now, 3)}
+
+        def getMarketData(self, mode, tokens):
+            market_data_calls.append((mode, tokens))
+            return {
+                "status": True,
+                "data": {
+                    "fetched": [
+                        {"symbolToken": "CE", "opnInterest": 150000},
+                        {"symbolToken": "PE", "opnInterest": 120000},
+                    ]
+                },
+            }
 
     manager = ConnectionManager(
         settings(tmp_path, credentials),
@@ -382,6 +396,68 @@ def test_collects_bounded_nearest_expiry_option_candles(tmp_path: Path) -> None:
     assert snapshot.option_archive_status == "success"
     assert snapshot.option_contracts_tracked == 2
     assert snapshot.archived_option_candles == 4
+    # Angel's historical-candle endpoint never returns open interest -- this
+    # is the fix for live Candidate B proposals always being blocked by
+    # CANDIDATE_B_MINIMUM_OPEN_INTEREST (see connections.py) because OI was
+    # never populated for Angel-sourced candles at all.
+    assert market_data_calls == [("FULL", {"NFO": ["CE", "PE"]})]
+    with manager.archive.connect() as con:
+        rows = dict(
+            con.execute(
+                "SELECT instrument_token, open_interest FROM market_candles "
+                "WHERE timeframe='FIVE_MINUTE' ORDER BY instrument_token"
+            ).fetchall()
+        )
+    assert rows == {"CE": 150000.0, "PE": 120000.0}
+
+
+def test_option_archive_refresh_survives_an_open_interest_fetch_failure(
+    tmp_path: Path,
+) -> None:
+    """OI is best-effort -- a failure fetching it must never block candle
+    archiving itself, since Candidate B's OI gate simply won't clear for
+    this cycle either way, and that's strictly better than losing candles
+    too."""
+    credentials = credential_file(tmp_path)
+    now = datetime(2026, 8, 6, 13, 53, tzinfo=IST)
+
+    class FakeApi:
+        def generateSession(self, *_args):
+            return {"status": True, "data": {"jwtToken": "secret"}}
+
+        def getCandleData(self, _payload):
+            return {"status": True, "data": candle_rows(now, 3)}
+
+        def getMarketData(self, *_args):
+            raise RuntimeError("quote service unavailable")
+
+    manager = ConnectionManager(
+        settings(tmp_path, credentials),
+        smart_api_factory=lambda _key: FakeApi(),
+        totp_factory=lambda _secret: "123456",
+        instrument_master_loader=lambda: [],
+        request_pause=lambda _seconds: None,
+    )
+    manager.connect_angel()
+    manager._snapshot = replace(manager.snapshot(), nifty_price=24620)
+    manager.archive.save_instruments(
+        [
+            Instrument(
+                "NIFTY13AUG2624600CE", "CE", "NFO", "NIFTY", "CE", 75, date(2026, 8, 13), 24600
+            )
+        ],
+        now,
+    )
+
+    snapshot = manager.refresh_option_archive(now)
+
+    assert snapshot.option_archive_status == "partial"
+    assert snapshot.archived_option_candles == 2
+    with manager.archive.connect() as con:
+        row = con.execute(
+            "SELECT open_interest FROM market_candles WHERE instrument_token='CE'"
+        ).fetchone()
+    assert row[0] is None
 
 
 def test_creates_read_only_atm_paper_proposal_with_bounded_risk(tmp_path: Path) -> None:

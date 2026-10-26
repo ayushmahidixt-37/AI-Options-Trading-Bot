@@ -352,6 +352,38 @@ class MarketArchive:
             )
             return con.total_changes - before
 
+    def set_latest_open_interest(
+        self, token: str, timeframe: str, value: float, as_of: datetime
+    ) -> int:
+        """Attach a live open-interest snapshot to the most recently archived
+        candle for this contract/timeframe at or before ``as_of``.
+
+        ``save_candles`` (the Angel-One live path) never writes
+        ``open_interest`` -- Angel's historical-candle endpoint it calls
+        doesn't return OI at all. This lets a separate live quote fetch
+        (``getMarketData`` in ``"FULL"`` mode) record OI against the candle
+        it was observed near, without touching the already-tested historical
+        replay path (``save_upstox_candles``/``save_dhan_candles``, which
+        already write OI directly on insert). A no-op if no matching candle
+        exists yet for this token/timeframe at or before ``as_of``.
+        """
+        with self.connect() as con:
+            row = con.execute(
+                """SELECT started_at FROM market_candles
+                   WHERE instrument_token=? AND timeframe=? AND started_at<=?
+                   ORDER BY started_at DESC LIMIT 1""",
+                (token, timeframe, as_of.isoformat()),
+            ).fetchone()
+            if row is None:
+                return 0
+            before = con.total_changes
+            con.execute(
+                """UPDATE market_candles SET open_interest=?
+                   WHERE instrument_token=? AND timeframe=? AND started_at=?""",
+                (value, token, timeframe, row[0]),
+            )
+            return con.total_changes - before
+
     def has_dhan_candles(self, token: str, start: date, end: date, timeframe: str) -> bool:
         """Whether any Dhan-sourced candle already exists for a token/timeframe in [start, end].
 
