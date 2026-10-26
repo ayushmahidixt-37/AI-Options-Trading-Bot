@@ -4,8 +4,23 @@
 > the same commit whenever scope, safety decisions, completed work, current
 > priorities, operating instructions, or known limitations change.
 
-**Last updated:** 2026-08-25
-**2026-08-25 (latest) — a fine-tuning pass on Candidate B, both items resolved "no change needed."**
+**Last updated:** 2026-10-26
+**2026-10-26 (latest) — fixed live Candidate B paper trading placing zero trades: open interest was
+never populated for Angel-sourced candles at all.** `create_paper_proposal` (`connections.py`) requires
+the archived option's most recent `open_interest` to be non-null and above
+`CANDIDATE_B_MINIMUM_OPEN_INTEREST` before building a proposal. `save_candles` (the always-running
+Angel live path) never wrote that column, and more fundamentally Angel's `getCandleData` endpoint it
+calls doesn't return OI at all -- so this check failed unconditionally, every cycle, since Candidate B
+was wired into live paper trading on 2026-08-24. Fixed by fetching OI separately via
+`getMarketData("FULL", ...)` (one batched call per `refresh_option_archive` cycle, covering every
+tracked contract) and a new `MarketArchive.set_latest_open_interest` that annotates the most recently
+archived candle for that contract -- best-effort: a failed OI fetch logs into that cycle's status detail
+but never blocks candle archiving itself. No existing behavior changed for the historical
+Upstox/Dhan-sourced engines (`save_upstox_candles`/`save_dhan_candles` already wrote OI directly on
+insert and are untouched). New regression tests cover both the success path and the OI-fetch-failure
+path in `tests/test_connections.py`.
+
+**2026-08-25 — a fine-tuning pass on Candidate B, both items resolved "no change needed."**
 A single-year parameter re-sweep (24 combinations of indicator periods) found the current live
 config already sits at a local optimum -- nothing beat it. A DhanHQ implied-volatility entry
 filter looked like a genuine capital-efficiency win in screening (band 10-20% IV: +9.53%/+4.54%
